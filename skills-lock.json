@@ -1,0 +1,215 @@
+{
+  "version": 1,
+  "skills": {
+    "applying-themes": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/applying-themes/SKILL.md",
+      "computedHash": "745c3c54300e1fbae2999ede5773efda6d3745a06017e6a70ba07fa60b34108e"
+    },
+    "brainstorming": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/brainstorming/SKILL.md",
+      "computedHash": "1bd95d7c1d52807f5249dc02dbe88a0294c540ec3b8ea2383a4eef7e77e4e04b"
+    },
+    "building-accessible-interfaces": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/building-accessible-interfaces/SKILL.md",
+      "computedHash": "f0a9e23166d820551677e7fe9cc7239e519a453ee193cd60c8dde32772bd5dde"
+    },
+    "building-finetuning-datasets": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/building-finetuning-datasets/SKILL.md",
+      "computedHash": "fa56f1ade9d22977d20d5d5c415480044d985edfa5c48234c1f390678368c95e"
+    },
+    "building-mcp-servers": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/building-mcp-servers/SKILL.md",
+      "computedHash": "43982ac7f486edc83d97316f4d6aa36f38f586af82b6bb9f2adc30775c3a6469"
+    },
+    "building-web-artifacts": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/building-web-artifacts/SKILL.md",
+      "computedHash": "cb4fe00ddc8310e69290919d9c1c4433aa46738bb0c4d27fcfb4878a3bb112a0"
+    },
+    "coauthoring-docs": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/coauthoring-docs/SKILL.md",
+      "computedHash": "e9a9071a43e102376a602c4887eea44d4a3a42d1475eb51a07d5d2bcd9fde208"
+    },
+    "creating-algorithmic-art": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/creating-algorithmic-art/SKILL.md",
+      "computedHash": "755f12d6549500e6a6550e8c4ddf4864b233311d9c527b1987bf68d30b52d9fe"
+    },
+    "creating-skills": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/creating-skills/SKILL.md",
+      "computedHash": "13a4021d3bb1c2558241c4c2d6c862f583a1e585e7512ad3dd71e553afdd9960"
+    },
+    "creating-slack-gifs": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/creating-slack-gifs/SKILL.md",
+      "computedHash": "34986e865f89fa077a02bd37a590dd759c6e3ab9274af0b0b57f92da53741a91"
+    },
+    "designing-canvas-art": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/designing-canvas-art/SKILL.md",
+      "computedHash": "6aacc6412ce483c0e8993297078e9beca124c157e37b631ea80e9fad6bb386d6"
+    },
+    "designing-frontend-interfaces": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/designing-frontend-interfaces/SKILL.md",
+      "computedHash": "03932bde6d8523fb0975848b839ad1c4b6d070ff7bb3ac6de60a5302de394bec"
+    },
+    "designing-user-experience": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/designing-user-experience/SKILL.md",
+      "computedHash": "78db0278c8f026786c1c4f3152958b41ccdda10cc6fc7f61f214124796da56fc"
+    },
+    "dispatching-parallel-agents": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/dispatching-parallel-agents/SKILL.md",
+      "computedHash": "c9532f9098c73c41df2efeec8c962eb1b4891b7b0a8e601be763c83fcff9a829"
+    },
+    "evolving-apis-and-schemas": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/evolving-apis-and-schemas/SKILL.md",
+      "computedHash": "2c79589b64e348d40d8e589975d0810d44a9ebdd6f81f491a8399245bb4fcf3f"
+    },
+    "executing-plans": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/executing-plans/SKILL.md",
+      "computedHash": "394c49fc1d9325f9526648f6f73b79b1ed8f6cf225409e330e2fe668249e8ba1"
+    },
+    "finishing-a-development-branch": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/finishing-a-development-branch/SKILL.md",
+      "computedHash": "1e6e4a2736a07a2e02203e0a662ab190822c93f2fc6345bedb954c1adc9fa8d9"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
+    "investigating-performance": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/investigating-performance/SKILL.md",
+      "computedHash": "df237d8b10726a6a24a33983b62eef2957935d15e4e013dbbf9d0fab56353f27"
+    },
+    "processing-pdf": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/processing-pdf/SKILL.md",
+      "computedHash": "72a60dbcc37e794d4a7b30c8bd16a8cb690afb07cc597167a858278dfc2ee925"
+    },
+    "receiving-code-review": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/receiving-code-review/SKILL.md",
+      "computedHash": "cead21363b4e76c63f7d31e95cdebf9c0047a06502fbd57809850a2e21096db6"
+    },
+    "requesting-code-review": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/requesting-code-review/SKILL.md",
+      "computedHash": "1ade946129f0de02ed798c61b2b53938194074e551419a77a02ce9f1057905b9"
+    },
+    "reviewing-interface-quality": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/reviewing-interface-quality/SKILL.md",
+      "computedHash": "ec2148c26668b534e3537224901832036eed9d737a7467b53229306ac271b982"
+    },
+    "reviewing-security": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/reviewing-security/SKILL.md",
+      "computedHash": "843b466672cf5a410209bf386d2d0d0e21299c07937a1d3050c724adbe2dae62"
+    },
+    "subagent-driven-development": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/subagent-driven-development/SKILL.md",
+      "computedHash": "ba4ba1a38a22ff7cf9f8f3f0cbce9023f380ed5d71adddec1d41fbc143b7ec08"
+    },
+    "systematic-debugging": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/systematic-debugging/SKILL.md",
+      "computedHash": "229a62ff3cc03035bfe3aa9ad46be4a52916d84fe55f4667bb0bc3c8730198bc"
+    },
+    "test-driven-development": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/test-driven-development/SKILL.md",
+      "computedHash": "81708932a146e145e2e494a0d85d96e06f00f28a68b5175e2979f5829b6d0b1f"
+    },
+    "testing-skills": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/testing-skills/SKILL.md",
+      "computedHash": "a7fe3c551c2829049e5a2565e002c296e3a7ec27a105dfd064935c4da453c6d4"
+    },
+    "testing-webapps": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/testing-webapps/SKILL.md",
+      "computedHash": "f4e9c84bb9d2a74b2d40834875527220926b20f1670929ad7fd862b707899d19"
+    },
+    "using-git-worktrees": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/using-git-worktrees/SKILL.md",
+      "computedHash": "c6c01d7dc705c79ed475adf15ee4203b02e22344cf9a8ec569c8d2e19ddb4b99"
+    },
+    "using-superpowers": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/using-superpowers/SKILL.md",
+      "computedHash": "748c6cfbd313cb34bfc2eb40b6adb3791efe566a687924868c22e75ef06d23fa"
+    },
+    "verifying-before-completion": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/verifying-before-completion/SKILL.md",
+      "computedHash": "1409bb3fda17a552d62c82655d30befc51296c76f18a49f6f37c05e1d4d2b54a"
+    },
+    "writing-internal-comms": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/writing-internal-comms/SKILL.md",
+      "computedHash": "042bb31e36f3d52604d4efb308c80712d32a8a51e311d103c93afacff7449e6b"
+    },
+    "writing-plans": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/writing-plans/SKILL.md",
+      "computedHash": "91ba961877548639e96c2bf7e74c86e39164a8d5a6979d3162e2dd84f17acbad"
+    },
+    "writing-release-notes": {
+      "source": "osmontero/opencode-skills",
+      "sourceType": "github",
+      "skillPath": "skills/writing-release-notes/SKILL.md",
+      "computedHash": "b773e6b25a256dd0404ba56571b52034a34461e634349b609a52ed5e726d4675"
+    }
+  }
+}
