@@ -29,7 +29,7 @@ pc_evaluation_cost_lookup  deterministic Gemini pricing
 ```
 
 It also seeds the **Master Prompters 2.0** competition with the **five real
-categories**, plus an isolated **TEST** competition used by the stress test:
+categories**, plus an isolated **TEST** competition used by the test suite:
 
 1. Meme Generation
 2. AI Visual Art Creation
@@ -149,45 +149,45 @@ Admin capabilities:
   `pc_responses`, `pc_participants`.)
 - **Export** — download all prompts (or a single category) as CSV, mapped back to
   participant registration details (name, email, phone, college, registration no).
-- **Stress-test cleanup** — deletes every TEST-competition row.
+- **Test suite** — seed realistic test data into the isolated TEST competition,
+  toggle the evaluator (dummy/Gemini), trigger evaluation, and clean up.
 
 Endpoints: `POST /api/admin/login`, `GET /api/admin/dashboard`,
 `GET /api/admin/monitor/live`, `GET /api/admin/monitor/logs`,
 `GET /api/admin/analytics`, `GET /api/admin/export/csv?category=N`,
-`POST /api/admin/evaluations/process-queue`, `POST /api/admin/test/cleanup`.
+`POST /api/admin/evaluations/process-queue`, `POST /api/admin/test/seed`,
+`POST /api/admin/test/cleanup`, `GET /api/admin/test/status`,
+`GET|POST /api/admin/test/llm-mode`.
 
-## 8. Stress test (auto-cleaning, no LLM)
+## 8. Test suite (isolated TEST competition)
 
-`scripts/stress_test.py` fires N concurrent `POST /api/submissions` requests
-against the isolated TEST competition using a synchronous, no-LLM path. It
-creates synthetic participants, mints participant JWTs locally (same secret),
-then **deletes all TEST data** when it finishes, leaving Supabase pristine.
+The **Test Suite** tab in the admin UI replaces the old stress test. It seeds
+`N` synthetic participants (1–1000) into the isolated TEST competition, each with
+5 realistic ~500-word prompts (one per category), generated deterministically so
+prompts are unique per participant/category. You can then run the evaluation
+pipeline with the evaluator set to either **dummy** (fast, free, deterministic)
+or **real Gemini** (waits on the API), and watch live status. Everything is
+deleted via **Admin → Test Suite → Clean up**.
 
-```
-python scripts/stress_test.py --total 1250 --concurrency 35
-```
-
-If the TEST competition/questions do not exist (older migration), the script seeds
-them first and cleans them up afterwards. The same cleanup is exposed to a live
-admin via **Admin → Export → Stress-test cleanup**.
-
-## 8b. End-to-end production test (PASS/FAIL, auto-cleanup)
+### 8b. End-to-end production test (PASS/FAIL, auto-cleanup)
 
 `scripts/e2e_production_test.py` is a single unattended harness that exercises the
 real flows against Supabase and exits `0` (PASS) or `1` (FAIL). Every network step
 has a hard timeout so it never hangs. It never touches the real `competition_2026`
 participants' submission data — it asserts the real QR-login mapping (login only,
-no submit) and runs all happy-path/negative/admin/load checks against the isolated
-**TEST** competition, whose data is deleted at the end.
+no submit) and runs all happy-path/negative/admin/eval/seed checks against the
+isolated **TEST** competition, whose data is deleted at the end.
 
 Modes:
 
 - `smoke` — active competition load, real QR-login mapping, unauthenticated-401,
-  one synthetic TEST submission, 5-responses + 5-jobs assertions.
+  one synthetic TEST submission, 5-responses assertion.
 - `admin` — login, dashboard, monitor/live, monitor/logs, analytics, export CSV,
-  process-queue. This is the live guard for the analytics/export 500 fix.
-- `load` — N concurrent TEST submissions (then cleanup).
-- `all` — smoke, then admin, then load (default).
+  test status, llm-mode. This is the live guard for the analytics/export 500 fix.
+- `eval` — seed 2 TEST participants, run the dummy evaluation pipeline, assert
+  evaluations are written.
+- `seed` — seed N TEST participants (then cleanup).
+- `all` — smoke, then admin, then eval, then seed (default).
 
 Against an already-running backend:
 
@@ -211,4 +211,4 @@ participant JWTs, and requires `ADMIN_PASSWORD` only for the `admin` mode.
 - Backend → Render Web Service (start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
 - Set env vars above in Render. The backend is stateless and ships no durable
   background workers; all durable state (jobs, logs, evaluations) lives in
-  Supabase, and the queue is drained via the admin panel or the stress worker.
+  Supabase, and the queue is drained via the admin panel's evaluation controls.

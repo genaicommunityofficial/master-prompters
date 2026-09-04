@@ -225,14 +225,14 @@ on conflict (id) do update set
   description = excluded.description,
   qr_event_id = excluded.qr_event_id;
 
--- TEST competition used by the stress test (auto-cleaned after the run).
+-- TEST competition used by the test suite (cleaned after the run).
 insert into public.pc_competitions
   (id, name, slug, description, status, leaderboard_visible, results_visible)
 values (
   'competition_test',
   'TEST Competition',
   'test-competition',
-  'Isolated competition for load/stress testing. Writes are cleaned automatically.',
+  'Isolated competition for the test suite. Writes are cleaned automatically.',
   'TEST',
   false,
   false

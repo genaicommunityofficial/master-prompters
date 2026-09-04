@@ -22,7 +22,7 @@ supabase/
   migrations/       new-table migrations + seed (0000_full_setup.sql = combined)
 scripts/
   apply_db.py       optional direct DB apply (needs DATABASE_URL)
-  stress_test.py    auto-cleaning load test (no LLM)
+  e2e_production_test.py   end-to-end test against the TEST competition
 docs/
   SETUP.md          step-by-step setup
 ```
@@ -62,14 +62,19 @@ map identity — no new credentials required.
 - Participant can only read/write their own submission (enforced in backend).
 - Admin is a separate username/password login (bcrypt-verified, rate-limited) that
   mints a `role=admin` JWT; admin ops (dashboard, live monitor, cost analytics,
-  prompt export, stress-test cleanup) are exposed via `frontend/src/pages/admin.tsx`.
+  prompt export, test suite) are exposed via `frontend/src/pages/admin.tsx`.
 
 ## Testing
 
 ```bash
-cd backend && .venv/Scripts/python.exe -m pytest -q   # 12 tests
+cd backend && .venv/Scripts/python.exe -m pytest -q   # 31 tests
 cd frontend && npm run lint && npm run typecheck
 
-# optional auto-cleaning load test (against the TEST competition, no LLM):
-cd backend && .venv/Scripts/python.exe ../scripts/stress_test.py --total 200
+# optional end-to-end test suite (isolated TEST competition):
+#   seeds realistic ~500-word prompts, runs the evaluation pipeline with the
+#   dummy evaluator, and cleans up. See --help for modes.
+cd backend && .venv/Scripts/python.exe ../scripts/e2e_production_test.py --mode all
+
+# In the admin UI, the Test Suite tab can seed data (1-1000 participants) and
+# toggle the evaluator between dummy (fast, no API cost) and real Gemini.
 ```

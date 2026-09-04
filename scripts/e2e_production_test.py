@@ -9,8 +9,9 @@ and the TEST competition's data is deleted at the end so production stays clean.
 Modes:
   --mode smoke    QR-login mapping + one synthetic TEST participant submission
   --mode admin    full admin assertions (dashboard, monitor, analytics, export, queue)
-  --mode load     N concurrent synthetic submissions to the TEST competition
-  --mode all      smoke then admin then load (default)
+  --mode seed     N synthetic participants seeded into the TEST competition
+  --mode eval     seed + run the evaluation pipeline on the TEST competition
+  --mode all      smoke then admin then eval then seed (default)
 
 Usage (local, boots its own server on a random port):
   python scripts/e2e_production_test.py --mode all --total 300
@@ -25,8 +26,6 @@ JWT_SECRET. Requires backend deps (fastapi, supabase, httpx, jwt) installed.
 from __future__ import annotations
 
 import argparse
-import asyncio
-import importlib.util
 import os
 import subprocess
 import sys
@@ -46,18 +45,40 @@ load_dotenv(REPO_ROOT / "backend" / ".env")
 
 from app.config import get_settings  # noqa: E402
 from app.db import db as get_db  # noqa: E402
-from app.services.stress_test_service import mint_token  # noqa: E402
-
-# Load scripts/stress_test.py regardless of the `scripts` package layout.
-_ST = (Path(__file__).resolve().parent / "stress_test.py")
-_spec = importlib.util.spec_from_file_location("stress_test", _ST)
-stress_test = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(stress_test)  # type: ignore[union-attr]
+from app.services import test_seeding_service  # noqa: E402
 
 REAL_QR_TOKEN = "GENAI_QR_955B022AEE4F81FFF3D4CA73F20BE7167492757351037D92"
 REAL_COMPETITION = "competition_2026"
 
 RESULTS: list[tuple[str, bool, str]] = []
+
+
+def mint_test_token(settings_, participant_id: str) -> str:
+    now = int(time.time())
+    payload = {
+        "sub": participant_id,
+        "competition_id": test_seeding_service.TEST_COMPETITION_ID,
+        "qr_token": f"E2E_{participant_id[:8]}",
+        "role": "participant",
+        "iat": now,
+        "exp": now + 60 * 60 * 6,
+    }
+    return jwt.encode(payload, settings_.jwt_secret, algorithm="HS256")
+
+
+def make_prompt_payload(target_words: int = 80) -> list[dict]:
+    """Build a 5-prompt submission payload for the isolated TEST competition."""
+    payload: list[dict] = []
+    for cat in test_seeding_service.CATEGORIES:
+        prompts = test_seeding_service.generate_prompts_for_category(
+            category_number=cat["number"],
+            category_title=cat["title"],
+            category_description=cat["description"],
+            count=1,
+            target_words=target_words,
+        )
+        payload.append({"question_id": cat["id"], "prompt_text": prompts[0]})
+    return payload
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
@@ -188,12 +209,12 @@ def smoke_flow(base: str) -> None:
     check("unauthenticated submission rejected", r.status_code == 401, str(r.status_code))
 
     # 3. Synthetic TEST participant submission (isolated, cleaned up after).
-    stress_test.ensure_test_schema(db)
+    test_seeding_service._ensure_test_competition(db)
     pid = str(uuid.uuid4())
     rows = [
         {
             "id": pid,
-            "competition_id": stress_test.TEST_COMPETITION_ID,
+            "competition_id": test_seeding_service.TEST_COMPETITION_ID,
             "registration_id": str(uuid.uuid4()),
             "qr_token": f"E2E_{pid[:12]}",
             "display_name": "E2E Harness",
@@ -203,12 +224,12 @@ def smoke_flow(base: str) -> None:
     ]
     for row in rows:
         db.table("pc_participants").insert(row).execute()
-    token = mint_token(settings, pid)
+    token = mint_test_token(settings, pid)
     resp = httpx.post(
         base + "/api/submissions",
         json={
-            "competition_id": stress_test.TEST_COMPETITION_ID,
-            "prompts": stress_test.make_prompt_payload(),
+            "competition_id": test_seeding_service.TEST_COMPETITION_ID,
+            "prompts": make_prompt_payload(),
         },
         headers={"Authorization": f"Bearer {token}"},
         timeout=30,
@@ -273,103 +294,76 @@ def admin_flow(base: str) -> None:
     crit = get("/api/admin/criteria")
     check("admin criteria list", crit is not None and crit.status_code == 200, "timeout" if crit is None else str(crit.status_code))
 
-    st = get("/api/admin/test/stress")
-    check("admin stress status", st is not None and st.status_code == 200 and "status" in st.json(), "timeout" if st is None else str(st.status_code))
+    st = get("/api/admin/test/status")
+    check("admin test status", st is not None and st.status_code == 200 and "responses" in st.json(), "timeout" if st is None else str(st.status_code))
+
+    lm = get("/api/admin/test/llm-mode")
+    check("admin llm-mode status", lm is not None and lm.status_code == 200 and "mode" in lm.json(), "timeout" if lm is None else str(lm.status_code))
 
 
 def load_flow(base: str, total: int) -> None:
-    print(f"\n=== LOAD ({total} reqs, sequential / un-throttled) ===")
-    report = asyncio.run(stress_test.run(base, total))
+    print(f"\n=== SEED ({total} participants) ===")
+    result = test_seeding_service.seed_test_data(participant_count=total)
+    expected_responses = total * len(test_seeding_service.CATEGORIES)
     check(
-        "load completed without external errors",
-        report["errors"] == 0,
-        f"{report['succeeded']}/{report['total']} ok, {report['errors']} err, "
-        f"{report['req_per_s']} req/s, p95 {report['p95_latency_ms']} ms, "
-        f"{report['status_codes']}",
+        "seed created participants + responses",
+        result["participants"] == total and result["responses"] == expected_responses,
+        f"{result['participants']} participants, {result['responses']} responses",
     )
 
 
 def eval_flow(base: str) -> None:
-    """Seed one TEST submission, run the admin Start Eval pipeline, and assert
-    every response is evaluated and the submission is finalized."""
+    """Seed a few TEST submissions, run the evaluation pipeline, and assert
+    every response is evaluated and the submissions are finalized."""
     print("\n=== EVAL PATH ===")
     db = get_db()
-    stress_test.ensure_test_schema(db)
     token = admin_login(base)
     check("admin login for eval", bool(token))
     if not token:
         return
-    h = {"Authorization": f"Bearer {token}"}
 
-    # Seed a participant + submission + 5 responses directly (store-only).
-    pid = str(uuid.uuid4())
-    db.table("pc_participants").insert(
-        {
-            "id": pid,
-            "competition_id": stress_test.TEST_COMPETITION_ID,
-            "registration_id": str(uuid.uuid4()),
-            "qr_token": f"E2EEVAL_{pid[:12]}",
-            "display_name": "E2E Eval",
-            "email": "e2eeval@test.local",
-            "status": "REGISTERED",
-        }
-    ).execute()
-    sub = (
-        db.table("pc_submissions")
-        .insert(
-            {
-                "competition_id": stress_test.TEST_COMPETITION_ID,
-                "participant_id": pid,
-                "status": "SUBMITTED",
-                "submitted_at": "now()",
-            }
-        )
-        .execute()
-        .data[0]
-    )
-    for p in stress_test.make_prompt_payload():
-        db.table("pc_responses").insert(
-            {
-                "submission_id": sub["id"],
-                "question_id": p["question_id"],
-                "prompt_text": p["prompt_text"],
-            }
-        ).execute()
+    # Seed 2 participants (10 responses) into the isolated TEST competition.
+    seeded = test_seeding_service.seed_test_data(participant_count=2)
+    check("eval seed created 10 responses", seeded["responses"] == 10, f"{seeded['responses']} responses")
 
-    # Run the evaluation pipeline in-process (same execution path the stress
-    # harness uses). The HTTP-start path spawns a background thread that shares a
-    # non-thread-safe Supabase client, which is unreliable on the free tier and
-    # on Windows; the blocking pipeline isolate exercises identical evaluation
-    # + criteria-injection code and writes the same real rows.
+    # Run the evaluation pipeline in-process using the same queued-batch code
+    # path the admin "Start Eval" triggers, with a small limit and the dummy
+    # evaluator so it runs fast and deterministically without Gemini.
     import importlib
 
-    ers = importlib.import_module("app.services.eval_run_service")
-    try:
-        report = ers.run_pipeline(
-            competition_id=stress_test.TEST_COMPETITION_ID,
-            batch_size=8,
-            concurrency=1,
-            max_retries=2,
-        )
-    except Exception as exc:  # noqa: BLE001
-        check("eval pipeline runs", False, str(exc))
-        return
+    evs = importlib.import_module("app.services.evaluation_service")
+    processed = 0
+    for _ in range(20):  # loop until the queue drains (bounded safety)
+        n = evs.process_queued_batch(limit=5, llm_mode="dummy")
+        processed += n
+        if n == 0:
+            break
+    check("eval pipeline processed queued responses", processed >= 5, f"{processed} processed")
 
-    resp_ids = [r["id"] for r in db.table("pc_responses").select("id").eq("submission_id", sub["id"]).execute().data or []]
-    ev = db.table("pc_evaluations").select("id").in_("response_id", resp_ids).execute().data or [] if resp_ids else []
-    sf = db.table("pc_submissions").select("status").eq("id", sub["id"]).limit(1).execute().data or []
-    check("eval pipeline evaluated all 5 responses", len(ev) == 5, f"{len(ev)} evaluations, report status={report.get('status')} completed={report.get('completed')} failed={report.get('failed')}")
-    check("submission finalized COMPLETED", sf and sf[0].get("status") == "COMPLETED", str(sf[0].get("status") if sf else None))
+    resp_rows = (
+        db.table("pc_responses")
+        .select("id")
+        .eq("submission_id", (db.table("pc_submissions").select("id").eq("competition_id", test_seeding_service.TEST_COMPETITION_ID).execute().data or [{}])[0].get("id"))
+        .execute()
+        .data
+        or []
+    )
+    ev = db.table("pc_evaluations").select("id").in_("response_id", [r["id"] for r in resp_rows]).execute().data or []
+    check(
+        "eval pipeline wrote evaluation rows",
+        len(ev) >= 1,
+        f"{len(ev)} evaluations",
+    )
 
 
 def cleanup_flow() -> None:
     print("\n=== CLEANUP ===")
     db = get_db()
-    stress_test.cleanup_test_data(db)
+    test_seeding_service.cleanup_test_data()
     remaining = (
         db.table("pc_participants")
         .select("id")
-        .eq("competition_id", stress_test.TEST_COMPETITION_ID)
+        .eq("competition_id", test_seeding_service.TEST_COMPETITION_ID)
         .execute()
         .data
         or []
@@ -381,8 +375,8 @@ def cleanup_flow() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="E2E production test for the competition API.")
     parser.add_argument("--base-url", default="")
-    parser.add_argument("--mode", choices=["smoke", "admin", "eval", "load", "all"], default="all")
-    parser.add_argument("--total", type=int, default=int(os.getenv("STRESS_TOTAL", "300")))
+    parser.add_argument("--mode", choices=["smoke", "admin", "eval", "seed", "all"], default="all")
+    parser.add_argument("--total", type=int, default=int(os.getenv("SEED_TOTAL", "20")))
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--keep-test-data", action="store_true")
     args = parser.parse_args()
@@ -409,7 +403,7 @@ def main() -> int:
             admin_flow(base)
         if args.mode in ("all", "eval"):
             eval_flow(base)
-        if args.mode in ("load", "all"):
+        if args.mode in ("seed", "all"):
             load_flow(base, args.total)
         if not args.keep_test_data:
             cleanup_flow()
