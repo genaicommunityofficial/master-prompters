@@ -407,12 +407,12 @@ def _recompute_ranks(competition_id: str) -> None:
         prev_score = score
 
 
-def process_queued_batch(limit: int = 10) -> int:
+def process_queued_batch(limit: int = 10, llm_mode: str | None = None) -> int:
     """Process up to *limit* QUEUED jobs, batching by question/criteria.
 
     Jobs sharing the same ``question_id`` are grouped and sent to the LLM in
     a single request, drastically reducing wall-clock time when many prompts
-    need evaluation.
+    need evaluation. ``llm_mode`` ("dummy"|"gemini") selects the evaluator.
     """
     jobs = get_queued_job_ids(limit)
     if not jobs:
@@ -455,11 +455,15 @@ def process_queued_batch(limit: int = 10) -> int:
 
     processed = 0
     for question_id, group in groups.items():
-        processed += _process_batch_group(question_id, group)
+        processed += _process_batch_group(question_id, group, llm_mode=llm_mode)
     return processed
 
 
-def _process_batch_group(question_id: str, group: list[tuple[dict, dict]]) -> int:
+def _process_batch_group(
+    question_id: str,
+    group: list[tuple[dict, dict]],
+    llm_mode: str | None = None,
+) -> int:
     """Evaluate a batch of prompts that share the same question_id."""
     from app.services import eval_criteria_service as crit
 
@@ -500,7 +504,11 @@ def _process_batch_group(question_id: str, group: list[tuple[dict, dict]]) -> in
     # --- Call batch evaluator (single LLM request for the whole group) ----
     try:
         results = submission_service.run_batch_evaluator(
-            items, question, evaluation_config, criteria_md=criteria_md
+            items,
+            question,
+            evaluation_config,
+            criteria_md=criteria_md,
+            llm_mode=llm_mode,
         )
     except Exception as exc:
         for job_row, _ in claimed:

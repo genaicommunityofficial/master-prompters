@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
@@ -73,6 +74,7 @@ class EvalStartRequest(BaseModel):
     batch_size: int = 8
     concurrency: int = 4
     max_retries: int = 3
+    llm_mode: str | None = None
 
 
 def _allowed_eval_competitions(payload: dict) -> set[str]:
@@ -94,6 +96,7 @@ def start_evaluation(
         batch_size=body.batch_size,
         concurrency=body.concurrency,
         max_retries=body.max_retries,
+        llm_mode=body.llm_mode,
     )
 
 
@@ -267,6 +270,25 @@ async def upload_criteria(
         file_name=saved["file_name"],
         content_hash=saved["content_hash"],
     )
+
+
+class LlmModeRequest(BaseModel):
+    mode: str  # "dummy" or "gemini"
+
+
+@router.post("/test/llm-mode")
+def set_llm_mode(body: LlmModeRequest, payload: dict = Depends(require_admin)) -> dict:
+    """Set the LLM mode used by the evaluator for the next run."""
+    if body.mode not in ("dummy", "gemini"):
+        raise HTTPException(status_code=400, detail="Mode must be 'dummy' or 'gemini'")
+    os.environ["ENABLE_DUMMY_LLM"] = "0" if body.mode == "gemini" else "1"
+    return {"mode": body.mode, "message": f"LLM mode set to {body.mode}"}
+
+
+@router.get("/test/llm-mode")
+def get_llm_mode(payload: dict = Depends(require_admin)) -> dict:
+    mode = "gemini" if os.getenv("ENABLE_DUMMY_LLM", "1") == "0" else "dummy"
+    return {"mode": mode}
 
 
 class LeaderboardPublishResponse(BaseModel):

@@ -282,17 +282,22 @@ def run_batch_evaluator(
     question: dict,
     evaluation_config: dict,
     criteria_md: str | None = None,
+    llm_mode: str | None = None,
 ) -> list[dict]:
     """Evaluate a batch of prompts that share the same question and criteria.
 
     Each item must contain at least ``prompt_text``. Returns a list of result
-    dicts in the same order as *items*.
+    dicts in the same order as *items*. ``llm_mode`` overrides the
+    ``ENABLE_DUMMY_LLM`` env var: ``"dummy"``/``"1"`` uses the in-process dummy,
+    ``"gemini"``/``"0"`` uses the real Gemini API.
     """
     if criteria_md:
         evaluation_config = {**(evaluation_config or {}), "criteria_md": criteria_md}
     from app.config import settings
 
-    if os.getenv("ENABLE_DUMMY_LLM", "1") == "1" or not settings.gemini_api_key:
+    mode = llm_mode or os.getenv("ENABLE_DUMMY_LLM", "1")
+    use_dummy = mode in ("1", "dummy")
+    if use_dummy or not settings.gemini_api_key:
         return LogOnlyEvaluator().batch_evaluate_sync(items, question, evaluation_config)
     return _gemini_batch_evaluate(items, question, evaluation_config)
 

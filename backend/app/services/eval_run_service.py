@@ -31,6 +31,7 @@ _state: dict[str, Any] = {
     "processed": 0,
     "completed": 0,
     "failed": 0,
+    "llm_mode": None,
     "started_at": None,
     "finished_at": None,
     "error_message": None,
@@ -63,6 +64,7 @@ def reset_for_tests() -> None:
                 "processed": 0,
                 "completed": 0,
                 "failed": 0,
+                "llm_mode": None,
                 "started_at": None,
                 "finished_at": None,
                 "error_message": None,
@@ -203,6 +205,7 @@ def start(
     batch_size: int = 8,
     concurrency: int = 4,
     max_retries: int = 3,
+    llm_mode: str | None = None,
 ) -> dict[str, Any]:
     batch_size, concurrency, max_retries = clamp_eval_params(
         batch_size=batch_size,
@@ -226,6 +229,7 @@ def start(
                 "processed": 0,
                 "completed": 0,
                 "failed": 0,
+                "llm_mode": llm_mode,
                 "started_at": time.time(),
                 "finished_at": None,
                 "error_message": None,
@@ -237,6 +241,7 @@ def start(
         batch_size=batch_size,
         concurrency=concurrency,
         max_retries=max_retries,
+        llm_mode=llm_mode,
     )
     return snapshot
 
@@ -297,10 +302,16 @@ def _run_thread(
     batch_size: int,
     concurrency: int,
     max_retries: int,
+    llm_mode: str | None = None,
 ) -> None:
     evaluation_service.MAX_ATTEMPTS = max_retries
     try:
-        _append_log("info", f"Starting evaluation for {competition_id}", competition_id=competition_id)
+        _append_log(
+            "info",
+            f"Starting evaluation for {competition_id} (llm_mode={llm_mode or 'env'})",
+            competition_id=competition_id,
+            llm_mode=llm_mode,
+        )
         enqueued = enqueue_pending_jobs(competition_id)
         _set(enqueued=enqueued)
         _append_log("info", f"Enqueued {enqueued} job(s)", enqueued=enqueued)
@@ -335,12 +346,13 @@ def _run_thread(
                 batch=len(job_ids),
             )
             # Shared Supabase HTTP client is not thread-safe on Windows.
-            # Dummy eval is already non-blocking; process jobs one at a time.
-            for jid in job_ids:
-                try:
-                    evaluation_service.process_job(jid)
-                except Exception as exc:  # noqa: BLE001
-                    _append_log("error", f"Job worker error: {exc}")
+            # Batch by question group; evaluate with the selected LLM mode.
+            try:
+                evaluation_service.process_queued_batch(
+                    limit=len(job_ids), llm_mode=llm_mode
+                )
+            except Exception as exc:  # noqa: BLE001
+                _append_log("error", f"Job worker error: {exc}")
             processed += len(job_ids)
             completed, failed = _job_counts(competition_id)
             _set(processed=processed, completed=completed, failed=failed)
