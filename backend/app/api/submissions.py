@@ -74,6 +74,25 @@ async def submit_individual(
     if comp.get("status") not in ("OPEN", "TEST"):
         raise HTTPException(status_code=400, detail="Competition is not currently accepting submissions.")
 
+    # Validate question membership + prompt length (same rules as batch).
+    questions = comp_svc.get_questions(competition_id)
+    q_by_id = {q["id"]: q for q in questions}
+    question = q_by_id.get(body.question_id)
+    if not question:
+        raise HTTPException(status_code=400, detail="That question is not valid for this competition.")
+    prompt_text = (body.prompt_text or "").strip()
+    if len(prompt_text) < int(question.get("min_length") or 0):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{question['title']}' must be at least {question.get('min_length')} characters.",
+        )
+    max_length = int(question.get("max_length") or comp.get("max_submission_length") or 4000)
+    if len(prompt_text) > max_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{question['title']}' must be at most {max_length} characters long.",
+        )
+
     # Check if already submitted
     existing = sub_svc.already_submitted(participant_id, competition_id)
     if existing and existing.get("status") in ("COMPLETED", "SUBMITTED"):
@@ -84,10 +103,9 @@ async def submit_individual(
         )
 
     db = get_db()
-    existing_sub = sub_svc.already_submitted(participant_id, competition_id)
 
-    if existing_sub:
-        submission = existing_sub
+    if existing:
+        submission = existing
         sub_id = submission["id"]
     else:
         # Create a new draft submission

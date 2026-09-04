@@ -128,16 +128,17 @@ class TestLeaderboardCategories:
         # Scripted sequence of execute() responses, in call order:
         # 1. pc_competitions (leaderboard visible)
         # 2. pc_submissions (completed, ranked)
-        # 3. pc_submissions.single competition_id lookup (for questions)
-        # 4. pc_questions (question_number map)
-        # 5. pc_responses (per submission)
-        # 6. pc_evaluations (scores)
-        # 7. pc_participants (display_name)
+        # 3. pc_participants (bulk display-name prefetch)
+        # 4. pc_submissions.single competition_id lookup (for questions)
+        # 5. pc_questions (question_number map)
+        # 6. pc_responses (per submission)
+        # 7. pc_evaluations (scores)
         responses = [
             R([{"leaderboard_visible": True, "status": "OPEN"}]),
             R([{
                 "id": "sub-1", "total_score": 420.0, "rank": 1, "participant_id": "p-1",
             }]),
+            R([{"id": "p-1", "display_name": "Ada"}]),
             R([{"competition_id": "competition_2026"}]),
             R([
                 {"id": "q1", "question_number": 1},
@@ -160,7 +161,6 @@ class TestLeaderboardCategories:
                 {"response_id": "r4", "score": 75},
                 {"response_id": "r5", "score": 90},
             ]),
-            R([{"display_name": "Ada"}]),
         ]
         seq = iter(responses)
 

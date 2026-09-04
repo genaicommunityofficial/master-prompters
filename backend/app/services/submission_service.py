@@ -109,10 +109,20 @@ def create_submission(
 ) -> dict:
     """Create the submission and responses. Evaluation jobs are created later
     when an admin starts the eval pipeline — submit is store-only.
+
+    If a draft (PROCESSING) submission already exists for this participant —
+    e.g. created by the individual-submit flow — the prompts are upserted into
+    it instead of being silently dropped.
     """
     existing = already_submitted(participant_id, competition_id)
-    if existing:
+    if existing and existing.get("status") in ("SUBMITTED", "COMPLETED"):
         return existing
+
+    if existing:
+        sub = existing
+        for p in prompts:
+            _upsert_response(sub["id"], p)
+        return _refresh_submission_state(sub, participant_id)
 
     submission = (
         db()
@@ -133,23 +143,7 @@ def create_submission(
     sub = submission[0]
 
     for p in prompts:
-        response = (
-            db()
-            .table("pc_responses")
-            .insert(
-                {
-                    "submission_id": sub["id"],
-                    "question_id": p["question_id"],
-                    "prompt_text": p["prompt_text"],
-                    "word_count": _word_count(p["prompt_text"]),
-                    "token_estimate": _estimate_tokens(p["prompt_text"]),
-                }
-            )
-            .execute()
-            .data
-        )
-        if not response:
-            raise SubmissionError("Could not store one of the responses.", 500)
+        _upsert_response(sub["id"], p)
 
     # Mark participant as submitted. Evaluation is admin-triggered later.
     (
@@ -160,6 +154,72 @@ def create_submission(
         .execute()
     )
 
+    return sub
+
+
+def _upsert_response(sub_id: str, prompt: dict) -> None:
+    """Insert or update one response row for a submission."""
+    existing_response = (
+        db()
+        .table("pc_responses")
+        .select("id")
+        .eq("submission_id", sub_id)
+        .eq("question_id", prompt["question_id"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    payload = {
+        "prompt_text": prompt["prompt_text"],
+        "word_count": _word_count(prompt["prompt_text"]),
+        "token_estimate": _estimate_tokens(prompt["prompt_text"]),
+    }
+    if existing_response:
+        (
+            db()
+            .table("pc_responses")
+            .update(payload)
+            .eq("id", existing_response[0]["id"])
+            .execute()
+        )
+    else:
+        (
+            db()
+            .table("pc_responses")
+            .insert({"submission_id": sub_id, "question_id": prompt["question_id"], **payload})
+            .execute()
+        )
+
+
+def _refresh_submission_state(sub: dict, participant_id: str) -> dict:
+    """Finalize a draft submission once all 5 responses are present."""
+    sub_id = sub["id"]
+    responses = (
+        db()
+        .table("pc_responses")
+        .select("id")
+        .eq("submission_id", sub_id)
+        .execute()
+        .data
+        or []
+    )
+    if len(responses) >= 5:
+        (
+            db()
+            .table("pc_submissions")
+            .update({"status": "SUBMITTED", "submitted_at": "now()"})
+            .eq("id", sub_id)
+            .execute()
+        )
+        (
+            db()
+            .table("pc_participants")
+            .update({"status": "SUBMITTED", "submitted_at": "now()"})
+            .eq("id", participant_id)
+            .execute()
+        )
+        sub["status"] = "SUBMITTED"
     return sub
 
 
@@ -387,21 +447,6 @@ def _gemini_batch_evaluate(
             "latency_ms": latency_ms,
         })
     return results
-
-
-def get_prompts_for_submission(competition_id: str, participant_id: str) -> list[dict]:
-    """Get all prompts saved for a submission."""
-    res = (
-        db()
-        .table("pc_responses")
-        .select("id, question_id, prompt_text")
-        .eq("submission_id", competition_id)
-        .eq("participant_id", participant_id)
-        .execute()
-        .data
-        or []
-    )
-    return res
 
 
 def get_saved_prompts(participant_id: str, competition_id: str) -> list[dict]:

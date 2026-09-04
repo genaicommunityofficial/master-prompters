@@ -16,31 +16,18 @@ CATEGORY_TITLES = {
 }
 
 
-def get_cost_by_model(competition_id: str) -> list[dict]:
-    """Per-model aggregate of token usage and estimated cost."""
-    evals = (
-        db()
-        .table("pc_evaluations")
-        .select(
-            "model, model_version, input_tokens, output_tokens, thinking_tokens, "
-            "estimated_cost_usd, count"
-        )
-        .execute()
-        .data
-        or []
-    )
-    return evals
-
-
 def get_evaluation_cost_summary(competition_id: str) -> dict[str, Any]:
     """Educational context only: returns raw aggregates; final pricing lookup
-    (pc_evaluation_cost_lookup) is applied at export/report time."""
+    (pc_evaluation_cost_lookup) is applied at export/report time. Scoped to the
+    given competition via responses -> submissions."""
     evals = (
         db()
         .table("pc_evaluations")
         .select(
-            "model, input_tokens, output_tokens, thinking_tokens, estimated_cost_usd, evaluation_version"
+            "model, input_tokens, output_tokens, thinking_tokens, estimated_cost_usd, evaluation_version, "
+            "pc_responses(pc_submissions(competition_id))"
         )
+        .eq("pc_responses.pc_submissions.competition_id", competition_id)
         .execute()
         .data
         or []
@@ -96,6 +83,7 @@ def get_analytics(competition_id: str) -> dict[str, Any]:
             "question_id, prompt_text, "
             "pc_evaluations(score), pc_submissions(competition_id)"
         )
+        .eq("pc_submissions.competition_id", competition_id)
         .execute()
         .data
         or []
@@ -140,20 +128,27 @@ def get_analytics(competition_id: str) -> dict[str, Any]:
     }
 
 
-def _resolve_registration(registration_id: str) -> dict:
-    try:
-        row = (
-            db()
-            .table("registrations")
-            .select("id, name, full_name, email, phone, college, registration_number")
-            .eq("id", registration_id)
-            .limit(1)
-            .execute()
-            .data
-        )
-        return row[0] if row else {}
-    except Exception:  # noqa: BLE001
-        return {}
+def _resolve_registrations(registration_ids: list[str]) -> dict[str, dict]:
+    """Batch-load registration rows by id (chunked to respect URL limits)."""
+    out: dict[str, dict] = {}
+    ids = [rid for rid in registration_ids if rid]
+    for i in range(0, len(ids), 100):
+        chunk = ids[i : i + 100]
+        try:
+            rows = (
+                db()
+                .table("registrations")
+                .select("id, name, full_name, email, phone, college, registration_number")
+                .in_("id", chunk)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:  # noqa: BLE001
+            continue
+        for row in rows:
+            out[row["id"]] = row
+    return out
 
 
 def _participant_details(competition_id: str) -> dict[str, dict]:
@@ -167,9 +162,10 @@ def _participant_details(competition_id: str) -> dict[str, dict]:
         .data
         or []
     )
+    regs = _resolve_registrations([p.get("registration_id") or "" for p in parts])
     out: dict[str, dict] = {}
     for p in parts:
-        reg = _resolve_registration(p.get("registration_id") or "")
+        reg = regs.get(p.get("registration_id") or "", {})
         out[p["id"]] = {
             "display_name": p.get("display_name"),
             "participant_email": p.get("email"),
@@ -231,19 +227,29 @@ def build_export(competition_id: str, category: int | None = None) -> tuple[list
     colspec = [("registration_number", "Registration Number"), ("full_name", "Full Name"),
                ("email", "Email"), ("phone", "Phone"), ("college", "College"), ("prompt_text", "Prompt")]
 
+    if not sub_ids:
+        filename = "prompts__all_categories.csv"
+        if category:
+            filename = f"prompts__category_{category}.csv"
+        return [], colspec, filename
+
     # Gather per-submission responses with question number + evaluation score.
-    responses = (
-        db()
-        .table("pc_responses")
-        .select(
-            "submission_id, question_id, prompt_text, "
-            "pc_evaluations(score), pc_questions(question_number)"
+    responses: list[dict] = []
+    for i in range(0, len(sub_ids), 100):
+        chunk = sub_ids[i : i + 100]
+        resp_rows = (
+            db()
+            .table("pc_responses")
+            .select(
+                "submission_id, question_id, prompt_text, "
+                "pc_evaluations(score), pc_questions(question_number)"
+            )
+            .in_("submission_id", chunk)
+            .execute()
+            .data
+            or []
         )
-        .in_("submission_id", sub_ids)
-        .execute()
-        .data
-        or []
-    )
+        responses.extend(resp_rows)
     # Index submissions by id.
     sub_by_id = {s["id"]: s for s in subs}
 

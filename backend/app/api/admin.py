@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
 from pydantic import BaseModel
 
 from app.security.auth import get_current_admin
@@ -330,6 +330,13 @@ def test_status(payload: dict = Depends(require_admin)) -> dict:
         or []
     )
     sub_ids = [s["id"] for s in subs]
+    participants = (
+        store.table("pc_participants")
+        .select("id", head=True, count="exact")
+        .eq("competition_id", "competition_test")
+        .execute()
+    )
+    participant_count = participants.count if hasattr(participants, "count") and participants.count is not None else len(sub_ids)
     responses = 0
     evaluated = 0
     if sub_ids:
@@ -361,7 +368,7 @@ def test_status(payload: dict = Depends(require_admin)) -> dict:
                 )
                 evaluated += len(ev_rows)
     return {
-        "participants": len(sub_ids),
+        "participants": participant_count,
         "submissions": len(sub_ids),
         "responses": responses,
         "evaluated": evaluated,

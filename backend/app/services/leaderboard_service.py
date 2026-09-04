@@ -50,6 +50,23 @@ def get_leaderboard(competition_id: str) -> dict:
     )
     subs_data = subs.data or []
 
+    # Prefetch display names in bulk so we don't query per entry.
+    participant_ids = list({s["participant_id"] for s in subs_data})
+    names_by_id: dict[str, str] = {}
+    for i in range(0, len(participant_ids), 100):
+        chunk = participant_ids[i : i + 100]
+        p_rows = (
+            db()
+            .table("pc_participants")
+            .select("id, display_name")
+            .in_("id", chunk)
+            .execute()
+            .data
+            or []
+        )
+        for p in p_rows:
+            names_by_id[p["id"]] = p.get("display_name") or "Participant"
+
     # Prefetch per-submission category scores so we don't hammer the DB per row.
     category_score_map = _category_scores_by_submission(subs_data)
 
@@ -62,17 +79,7 @@ def get_leaderboard(competition_id: str) -> dict:
             rank = i
         prev_score = score
 
-        participant = (
-            db()
-            .table("pc_participants")
-            .select("display_name")
-            .eq("id", sub["participant_id"])
-            .limit(1)
-            .execute()
-        )
-        name = "Participant"
-        if participant.data:
-            name = participant.data[0].get("display_name") or "Participant"
+        name = names_by_id.get(sub["participant_id"], "Participant")
 
         category_scores = category_score_map.get(sub["id"], {})
         cat_values = [v for v in category_scores.values() if v is not None]
@@ -144,7 +151,8 @@ def _category_scores_by_submission(subs_data: list[dict]) -> dict[str, dict[int,
         for r in rows:
             responses_by_sub.setdefault(r["submission_id"], []).append(r)
 
-    # Latest evaluation score per response.
+    # Latest evaluation score per response (rows ordered by created_at so the
+    # newest evaluation wins when a response was re-evaluated).
     score_by_response: dict[str, float] = {}
     for group in responses_by_sub.values():
         resp_ids = [r["id"] for r in group]
@@ -155,8 +163,9 @@ def _category_scores_by_submission(subs_data: list[dict]) -> dict[str, dict[int,
             ev_rows = (
                 db()
                 .table("pc_evaluations")
-                .select("response_id, score")
+                .select("response_id, score, created_at")
                 .in_("response_id", rchunk)
+                .order("created_at")
                 .execute()
                 .data
                 or []

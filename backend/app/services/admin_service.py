@@ -164,17 +164,21 @@ def get_admin_submissions(competition_id: str) -> list[dict]:
     return subs
 
 
-def get_admin_evaluations(competition_id: str, status_filter: str | None = None) -> list[dict]:
+def get_admin_evaluations(competition_id: str, status_filter: str | None = None, limit: int = 500) -> list[dict]:
     jobs = (
         db()
         .table("pc_evaluation_jobs")
         .select(
             "id, status, model, attempt_count, queued_at, last_error, "
-            "pc_responses(id, prompt_text, question_id, submission_id)"
+            "pc_responses(id, prompt_text, question_id, pc_submissions(competition_id))"
         )
+        .eq("pc_responses.pc_submissions.competition_id", competition_id)
         .order("queued_at", desc=True)
+        .limit(limit)
         .execute()
         .data
         or []
     )
+    if status_filter:
+        jobs = [j for j in jobs if j.get("status") == status_filter]
     return jobs

@@ -349,7 +349,7 @@ def _run_thread(
             # Batch by question group; evaluate with the selected LLM mode.
             try:
                 evaluation_service.process_queued_batch(
-                    limit=len(job_ids), llm_mode=llm_mode
+                    limit=len(job_ids), llm_mode=llm_mode, competition_id=competition_id
                 )
             except Exception as exc:  # noqa: BLE001
                 _append_log("error", f"Job worker error: {exc}")

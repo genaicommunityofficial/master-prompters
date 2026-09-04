@@ -373,7 +373,7 @@ def _recompute_ranks(competition_id: str) -> None:
     subs = (
         db()
         .table("pc_submissions")
-        .select("id")
+        .select("id, total_score")
         .eq("competition_id", competition_id)
         .eq("status", "COMPLETED")
         .not_.is_("total_score", "null")
@@ -385,16 +385,7 @@ def _recompute_ranks(competition_id: str) -> None:
     rank = 0
     prev_score = None
     for i, sub in enumerate(subs, start=1):
-        current = (
-            db()
-            .table("pc_submissions")
-            .select("total_score")
-            .eq("id", sub["id"])
-            .limit(1)
-            .execute()
-        )
-        crows = current.data or []
-        score = float(crows[0]["total_score"]) if crows else None
+        score = float(sub["total_score"])
         if score != prev_score:
             rank = i
         (
@@ -407,14 +398,23 @@ def _recompute_ranks(competition_id: str) -> None:
         prev_score = score
 
 
-def process_queued_batch(limit: int = 10, llm_mode: str | None = None) -> int:
+def process_queued_batch(
+    limit: int = 10,
+    llm_mode: str | None = None,
+    competition_id: str | None = None,
+) -> int:
     """Process up to *limit* QUEUED jobs, batching by question/criteria.
 
     Jobs sharing the same ``question_id`` are grouped and sent to the LLM in
     a single request, drastically reducing wall-clock time when many prompts
     need evaluation. ``llm_mode`` ("dummy"|"gemini") selects the evaluator.
+    When ``competition_id`` is given only jobs whose responses belong to that
+    competition are processed (prevents cross-competition contamination).
     """
-    jobs = get_queued_job_ids(limit)
+    if competition_id:
+        jobs = get_queued_job_ids_for_competition(competition_id, limit)
+    else:
+        jobs = get_queued_job_ids(limit)
     if not jobs:
         return 0
 
@@ -513,6 +513,17 @@ def _process_batch_group(
     except Exception as exc:
         for job_row, _ in claimed:
             _fail_or_retry(job_row["id"], str(exc), int(job_row.get("attempt_count") or 1))
+        return 0
+
+    if len(results) != len(claimed):
+        # Evaluator returned a mismatched batch; requeue so nothing is left
+        # stuck in PROCESSING.
+        for job_row, _ in claimed:
+            _fail_or_retry(
+                job_row["id"],
+                f"evaluator returned {len(results)} results for {len(claimed)} prompts",
+                int(job_row.get("attempt_count") or 1),
+            )
         return 0
 
     # --- Persist each result ----------------------------------------------

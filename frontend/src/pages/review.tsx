@@ -118,32 +118,26 @@ export default function ReviewPage() {
         window.localStorage.removeItem(DRAFT_KEY)
         nav('/submitted', { state: { message: 'Your responses have been saved. Evaluation starts when an administrator runs it.' } })
       } else if (results.some((r) => r !== null)) {
-        // Some succeeded, some failed - try batch for remaining
-        const failedQuestions = questions.filter((_q, idx) => !results[idx])
-        const failedPrompts = failedQuestions.map((q) => ({
+        // Some succeeded, some failed - resubmit all five via batch. The API
+        // upserts responses into any existing draft, so no work is lost.
+        const prompts = questions.map((q) => ({
           question_id: q.id,
           prompt_text: draft[q.id] ?? '',
         }))
-
-        if (failedPrompts.length > 0) {
-          try {
-            await api.submit(competitionId, failedPrompts)
-            window.localStorage.removeItem(DRAFT_KEY)
-            nav('/submitted', { state: { message: 'Your responses have been saved. Evaluation starts when an administrator runs it.' } })
-            return
-          } catch (batchErr) {
-            setError(
-              batchErr instanceof Error
-                ? batchErr.message
-                : 'Some prompts could not be submitted. Please try again.',
-            )
-            setSubmissionStatus((prev) => ({ ...prev, status: 'error' }))
-            return
-          }
+        try {
+          await api.submit(competitionId, prompts)
+          window.localStorage.removeItem(DRAFT_KEY)
+          nav('/submitted', { state: { message: 'Your responses have been saved. Evaluation starts when an administrator runs it.' } })
+          return
+        } catch (batchErr) {
+          setError(
+            batchErr instanceof Error
+              ? batchErr.message
+              : 'Some prompts could not be submitted. Please try again.',
+          )
+          setSubmissionStatus((prev) => ({ ...prev, status: 'error' }))
+          return
         }
-
-        window.localStorage.removeItem(DRAFT_KEY)
-        nav('/submitted', { state: { message: 'Your responses have been submitted.' } })
       } else {
         // All individual submissions failed - try single batch submission
         const prompts = questions.map((q) => ({
