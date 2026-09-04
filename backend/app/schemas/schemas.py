@@ -96,6 +96,8 @@ class LeaderboardEntry(BaseModel):
     rank: int
     display_name: str
     total_score: float
+    category_scores: dict[int, float] = {}
+    average_score: float | None = None
 
 
 class LeaderboardResponse(BaseModel):

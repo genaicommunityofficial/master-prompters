@@ -147,6 +147,64 @@ def has_submission(participant_id: str, competition_id: str) -> bool:
     return bool(sub.data)
 
 
+def _ensure_competition_open(competition_id: str) -> None:
+    competition = (
+        db()
+        .table("pc_competitions")
+        .select("status")
+        .eq("id", competition_id)
+        .limit(1)
+        .execute()
+    )
+    rows = competition.data or []
+    if not rows:
+        raise AuthError("Competition not found")
+    if rows[0].get("status") not in ("OPEN", "RESULTS_PUBLISHED"):
+        raise AuthError("Competition is not accepting logins right now")
+
+
+def login_with_registration_number(registration_number: str, competition_id: str) -> dict:
+    """Production login using an official registration number.
+
+    Looks up an existing participant in ``pc_participants`` by
+    registration_number. If none exists, we report "not participated"
+    rather than auto-creating a synthetic account.
+    """
+    _ensure_competition_open(competition_id)
+
+    participant = (
+        db()
+        .table("pc_participants")
+        .select("*")
+        .eq("competition_id", competition_id)
+        .eq("registration_number", registration_number.strip())
+        .limit(1)
+        .execute()
+    )
+    rows = participant.data or []
+    if not rows:
+        raise AuthError("This registration number is not registered for this event.")
+
+    p = rows[0]
+    already_submitted = has_submission(p["id"], competition_id)
+    jwt_token = create_participant_token(
+        competition_id=competition_id,
+        participant_id=p["id"],
+        qr_token=p["qr_token"],
+    )
+    return {
+        "token": jwt_token,
+        "participant": {
+            "competition_id": competition_id,
+            "participant_id": p["id"],
+            "display_name": p.get("display_name") or "Participant",
+            "email": p.get("email"),
+            "vit_registration_number": p.get("registration_number"),
+            "already_submitted": already_submitted,
+        },
+    }
+
+
 def login_with_qr_message(qr_message: str, competition_id: str) -> dict:
     try:
         token_in = normalize_qr_message(qr_message)

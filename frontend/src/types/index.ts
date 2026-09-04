@@ -53,11 +53,22 @@ export interface LeaderboardEntry {
   rank: number
   display_name: string
   total_score: number
+  category_scores?: Record<number, number>
+  average_score?: number | null
 }
 
 export interface LeaderboardResponse {
   visible: boolean
   entries: LeaderboardEntry[]
+}
+
+export interface ManualRegistration {
+  id: string
+  registration_number: string | null
+  display_name: string | null
+  email: string | null
+  status: string | null
+  created_at: string | null
 }
 
 export interface DashboardMetrics {

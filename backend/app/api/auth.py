@@ -49,6 +49,29 @@ class TestLoginRequest(BaseModel):
     competition_id: str
 
 
+class RegistrationNumberLoginRequest(BaseModel):
+    registration_number: str
+    competition_id: str
+
+
+@router.post("/login/registration-number", response_model=AuthResponse)
+async def registration_number_login(body: RegistrationNumberLoginRequest) -> AuthResponse:
+    """Production login using an official registration number."""
+    if not body.registration_number.strip():
+        raise HTTPException(status_code=400, detail="Registration number is required.")
+    try:
+        result = auth_service.login_with_registration_number(
+            registration_number=body.registration_number,
+            competition_id=body.competition_id,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    return AuthResponse(
+        token=result["token"],
+        participant=ParticipantInfo(**result["participant"]),
+    )
+
+
 @router.post("/login/test", response_model=AuthResponse)
 async def test_login(body: TestLoginRequest) -> AuthResponse:
     """Development-only fallback login: accepts email, registration number, or display name."""

@@ -12,6 +12,7 @@ import type {
   LiveLogsResponse,
   LiveStats,
   LlmModeResponse,
+  ManualRegistration,
   PromptInput,
   SeedResult,
   SubmissionReceipt,
@@ -104,6 +105,14 @@ export const api = {
     request<AuthResponse>('/auth/login/test', {
       method: 'POST',
       body: JSON.stringify({ competition_id: competitionId, identifier }),
+    }),
+  loginWithRegistrationNumber: (competitionId: string, registrationNumber: string) =>
+    request<AuthResponse>('/auth/login/registration-number', {
+      method: 'POST',
+      body: JSON.stringify({
+        competition_id: competitionId,
+        registration_number: registrationNumber,
+      }),
     }),
   submit: (competitionId: string, prompts: PromptInput[]) =>
     request<SubmissionReceipt>('/submissions', {
@@ -213,6 +222,17 @@ export const api = {
   },
   adminExportUrl: (category?: number) =>
     `/admin/export/csv${category ? `?category=${category}` : ''}`,
+  adminListRegistrations: (token?: string) =>
+    request<ManualRegistration[]>('/admin/registrations', {}, token ?? getAdminToken()),
+  adminCreateRegistration: (
+    body: { registration_number: string; display_name?: string; email?: string },
+    token?: string,
+  ) =>
+    request<{ success: boolean; id: string; registration_number?: string; display_name?: string }>(
+      '/admin/registrations',
+      { method: 'POST', body: JSON.stringify(body) },
+      token ?? getAdminToken(),
+    ),
 }
 
 export function extractQrDetails(message: string): string {

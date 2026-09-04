@@ -63,43 +63,63 @@ export default function LeaderboardPage() {
           ) : (
             <>
               <p className="mt-3 text-muted-foreground">
-                Rankings are shown only for fully evaluated submissions.
+                Rankings are shown only for fully evaluated submissions. Category columns
+                show the score for each of the five competition areas.
               </p>
               <Card className="mt-8">
                 <CardContent className="p-0">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-                        <th className="px-5 py-3 font-medium">Rank</th>
-                        <th className="px-5 py-3 font-medium">Participant</th>
-                        <th className="px-5 py-3 text-right font-medium">Score</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(data?.entries ?? []).map((e, i) => (
-                        <tr
-                          key={`${e.rank}-${i}`}
-                          className={cn(
-                            'border-b border-border/60 last:border-0',
-                            i <= 2 ? 'bg-muted/30' : '',
-                          )}
-                        >
-                          <td className="px-5 py-3.5 font-semibold">{e.rank}</td>
-                          <td className="px-5 py-3.5">{e.display_name}</td>
-                          <td className="px-5 py-3.5 text-right font-semibold tabular-nums">
-                            {e.total_score}
-                          </td>
+                  <div className="overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
+                          <th className="px-5 py-3 font-medium">Rank</th>
+                          <th className="px-5 py-3 font-medium">Participant</th>
+                          {[1, 2, 3, 4, 5].map((q) => (
+                            <th key={q} className="px-3 py-3 text-right font-medium">
+                              Q{q}
+                            </th>
+                          ))}
+                          <th className="px-5 py-3 text-right font-medium">Total</th>
+                          <th className="px-5 py-3 text-right font-medium">Avg</th>
                         </tr>
-                      ))}
-                      {data?.entries.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} className="px-5 py-8 text-center text-muted-foreground">
-                            No results published yet.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {(data?.entries ?? []).map((e, i) => (
+                          <tr
+                            key={`${e.rank}-${i}`}
+                            className={cn(
+                              'border-b border-border/60 last:border-0',
+                              i <= 2 ? 'bg-muted/30' : '',
+                            )}
+                          >
+                            <td className="px-5 py-3.5 font-semibold">{e.rank}</td>
+                            <td className="px-5 py-3.5">{e.display_name}</td>
+                            {[1, 2, 3, 4, 5].map((q) => (
+                              <td
+                                key={q}
+                                className="px-3 py-3.5 text-right tabular-nums text-muted-foreground"
+                              >
+                                {e.category_scores?.[q] ?? '—'}
+                              </td>
+                            ))}
+                            <td className="px-5 py-3.5 text-right font-semibold tabular-nums">
+                              {e.total_score}
+                            </td>
+                            <td className="px-5 py-3.5 text-right tabular-nums">
+                              {e.average_score ?? '—'}
+                            </td>
+                          </tr>
+                        ))}
+                        {data?.entries.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="px-5 py-8 text-center text-muted-foreground">
+                              No results published yet.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
                 </CardContent>
               </Card>
             </>

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { QrCode, ScanLine, KeyRound, UserRound } from 'lucide-react'
+import { QrCode, ScanLine, KeyRound, UserRound, BadgeCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,7 @@ import { api, setToken } from '@/services/api'
 import { useSession } from '@/store/session'
 import { cn } from '@/lib/utils'
 
-type Mode = 'scan' | 'text' | 'quick'
+type Mode = 'scan' | 'text' | 'reg' | 'quick'
 
 export default function QrLogin({ competitionId }: { competitionId: string }) {
   const nav = useNavigate()
@@ -18,6 +18,7 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
   const [mode, setMode] = useState<Mode>('scan')
   const [fileName, setFileName] = useState('')
   const [qrMessage, setQrMessage] = useState('')
+  const [regNumber, setRegNumber] = useState('')
   const [quickId, setQuickId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -84,6 +85,31 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
     }
   }
 
+  const handleReg = async () => {
+    if (!regNumber.trim()) {
+      setError('Please enter your registration number.')
+      return
+    }
+    if (!competitionId) {
+      setError('Competition not available. Please wait or refresh the page.')
+      return
+    }
+    setError('')
+    setLoading(true)
+    try {
+      const res = await api.loginWithRegistrationNumber(competitionId, regNumber.trim())
+      applyAuth(res)
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Unable to log in with that registration number.',
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleQuick = async () => {
     if (!quickId.trim()) {
       setError('Please enter your email, registration number, or display name.')
@@ -140,6 +166,16 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
             )}
           >
             <KeyRound className="h-4 w-4" /> Paste message
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('reg')}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+              mode === 'reg' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+            )}
+          >
+            <BadgeCheck className="h-4 w-4" /> Registration no.
           </button>
           {isDev ? (
             <button
@@ -204,6 +240,32 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
               disabled={loading || !qrMessage.trim()}
             >
               {loading ? <Spinner className="h-4 w-4" /> : 'Continue'}
+            </Button>
+          </div>
+        ) : mode === 'reg' ? (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="reg-number">Registration number</Label>
+              <Input
+                id="reg-number"
+                autoComplete="off"
+                placeholder="e.g. 23BCE0001"
+                value={regNumber}
+                onChange={(e) => setRegNumber(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleReg()}
+                disabled={loading}
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter the registration number you used when you signed up for this event.
+              </p>
+            </div>
+            <Button
+              className="w-full"
+              size="lg"
+              onClick={handleReg}
+              disabled={loading || !regNumber.trim()}
+            >
+              {loading ? <Spinner className="h-4 w-4" /> : 'Sign in'}
             </Button>
           </div>
         ) : (

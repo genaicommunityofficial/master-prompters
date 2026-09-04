@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Upload
 from pydantic import BaseModel
 
 from app.security.auth import get_current_admin
-from app.services import admin_analytics_service, admin_auth_service, admin_service, competition_service
+from app.services import admin_analytics_service, admin_auth_service, admin_registration_service, admin_service, competition_service
 from app.services import eval_criteria_service
 from app.services import eval_run_service
 from app.services import leaderboard_service as lb_svc
@@ -372,6 +372,48 @@ def test_status(payload: dict = Depends(require_admin)) -> dict:
 class LeaderboardPublishResponse(BaseModel):
     success: bool
     visible: bool
+
+
+class RegistrationCreateRequest(BaseModel):
+    registration_number: str
+    display_name: str | None = None
+    email: str | None = None
+
+
+@router.get("/registrations")
+def list_registrations(payload: dict = Depends(require_admin)) -> list[dict]:
+    """List manually-registered participants (those with a registration number)."""
+    competition_id = payload["competition_id"]
+    try:
+        return admin_registration_service.list_registrations(competition_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not load registrations: {exc}") from exc
+
+
+@router.post("/registrations")
+def create_registration(
+    body: RegistrationCreateRequest,
+    payload: dict = Depends(require_admin),
+) -> dict:
+    """Manually register a participant by official registration number."""
+    competition_id = payload["competition_id"]
+    try:
+        row = admin_registration_service.register_participant(
+            competition_id=competition_id,
+            registration_number=body.registration_number,
+            display_name=body.display_name,
+            email=body.email,
+        )
+    except admin_registration_service.RegistrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not register participant: {exc}") from exc
+    return {
+        "success": True,
+        "id": row["id"],
+        "registration_number": row.get("registration_number"),
+        "display_name": row.get("display_name"),
+    }
 
 
 @router.post("/competition/open")

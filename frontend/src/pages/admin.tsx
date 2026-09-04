@@ -18,6 +18,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  UserPlus,
   X,
 } from 'lucide-react'
 import { AdminShell } from '@/components/layout'
@@ -26,6 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
+import { cn } from '@/lib/utils'
 import {
   api,
   clearAdminSession,
@@ -39,10 +41,11 @@ import type {
   EvalLogEntry,
   EvalRunStatus,
   LiveLogsResponse,
+  ManualRegistration,
   TestSuiteStatus,
 } from '@/types'
 
-type Tab = 'dashboard' | 'monitor' | 'cost' | 'criteria' | 'export' | 'test'
+type Tab = 'dashboard' | 'monitor' | 'cost' | 'criteria' | 'export' | 'registrations' | 'test'
 
 const API_BASE: string = (import.meta.env.VITE_API_BASE_URL as string) ?? '/api'
 
@@ -67,6 +70,7 @@ export default function AdminPage() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [loading, setLoading] = useState(false)
   const [evalBusy, setEvalBusy] = useState(false)
+  const [evalLlmMode, setEvalLlmMode] = useState<'dummy' | 'gemini'>('dummy')
   const [queueNote, setQueueNote] = useState('')
   const [evalRun, setEvalRun] = useState<EvalRunStatus | null>(null)
   const [evalLogs, setEvalLogs] = useState<EvalLogEntry[]>([])
@@ -249,7 +253,7 @@ export default function AdminPage() {
     setEvalBusy(true)
     try {
       const res = await api.adminStartEval(
-        { batch_size: 8, concurrency: 4, max_retries: 3 },
+        { batch_size: 8, concurrency: 4, max_retries: 3, llm_mode: evalLlmMode },
         token,
       )
       setEvalRun(res)
@@ -258,7 +262,9 @@ export default function AdminPage() {
       } else {
         setEvalLogs([])
         evalLogSeq.current = 0
-        setQueueNote('Evaluation started. Prompts stay stored until this run finishes.')
+        setQueueNote(
+          `Evaluation started for the live competition with the ${evalLlmMode} LLM. Prompts stay stored until this run finishes.`,
+        )
         await refreshEval()
         await refreshDashboard()
       }
@@ -372,6 +378,7 @@ export default function AdminPage() {
     { key: 'monitor', label: 'Live monitor' },
     { key: 'cost', label: 'Cost & analytics' },
     { key: 'criteria', label: 'Criteria' },
+    { key: 'registrations', label: 'Registrations' },
     { key: 'test', label: 'Test Suite' },
     { key: 'export', label: 'Export' },
   ]
@@ -442,6 +449,28 @@ export default function AdminPage() {
                   <><LockOpen className="h-4 w-4" /> Open submissions</>
                 )}
               </Button>
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+                <button
+                  type="button"
+                  onClick={() => setEvalLlmMode('dummy')}
+                  className={cn(
+                    'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                    evalLlmMode === 'dummy' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+                  )}
+                >
+                  <Bot className="h-3.5 w-3.5" /> Dummy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEvalLlmMode('gemini')}
+                  className={cn(
+                    'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                    evalLlmMode === 'gemini' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+                  )}
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> Gemini
+                </button>
+              </div>
               <Button
                 size="sm"
                 onClick={handleStartEval}
@@ -485,7 +514,8 @@ export default function AdminPage() {
               </p>
             ) : (
               <p className="mt-2 text-xs text-muted-foreground text-right">
-                Submissions are stored only. Start Eval queues and scores them in batches.
+                Live competition <strong>{metrics.competition_id}</strong> · Start Eval queues and
+                scores responses in batches with the selected LLM.
               </p>
             )}
             <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -502,6 +532,19 @@ export default function AdminPage() {
               <Stat label="Median score" value={metrics.median_score} />
               <Stat label="Highest score" value={metrics.highest_score} />
             </div>
+            {metrics.evaluation_failed && metrics.evaluation_failed > 0 ? (
+              <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-700">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="font-medium">
+                    {metrics.evaluation_failed} evaluation{metrics.evaluation_failed === 1 ? '' : 's'} failed.
+                  </p>
+                  <p className="mt-0.5 text-amber-600/80">
+                    Start Eval again to requeue failed jobs and finish scoring.
+                  </p>
+                </div>
+              </div>
+            ) : null}
             {metrics.per_category && Object.keys(metrics.per_category).length > 0 ? (
               <div className="mt-6">
                 <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
@@ -593,6 +636,10 @@ export default function AdminPage() {
 
         {phase === 'criteria' && (
           <CriteriaPanel token={token} onError={setError} onNote={setExportNote} />
+        )}
+
+        {phase === 'registrations' && (
+          <RegistrationsPanel token={token} onError={setError} onNote={setExportNote} />
         )}
 
         {phase === 'test' && (
@@ -943,6 +990,154 @@ function TestSuitePanel({
           {!canEvaluate ? (
             <p className="text-xs text-muted-foreground">Seed test data before running evaluation.</p>
           ) : null}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function RegistrationsPanel({
+  token,
+  onError,
+  onNote,
+}: {
+  token: string
+  onError: (m: string) => void
+  onNote: (m: string) => void
+}) {
+  const [regs, setRegs] = useState<ManualRegistration[]>([])
+  const [regNumber, setRegNumber] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.adminListRegistrations(token)
+      setRegs(list)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not load registrations.')
+    }
+  }, [token, onError])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const handleRegister = async () => {
+    if (!regNumber.trim()) {
+      onError('Registration number is required.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.adminCreateRegistration(
+        {
+          registration_number: regNumber.trim(),
+          display_name: displayName.trim() || undefined,
+          email: email.trim() || undefined,
+        },
+        token,
+      )
+      onNote(`Registered ${regNumber.trim()}. They can now sign in with their registration number.`)
+      setRegNumber('')
+      setDisplayName('')
+      setEmail('')
+      await load()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not register participant.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-8 space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <UserPlus className="h-4 w-4" /> Register a participant
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Register participants manually by their official registration number. They can then
+            sign in with that number — no QR code needed.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="reg-num">Registration number *</Label>
+              <Input
+                id="reg-num"
+                placeholder="e.g. 23BCE0001"
+                value={regNumber}
+                onChange={(e) => setRegNumber(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="reg-name">Display name</Label>
+              <Input
+                id="reg-name"
+                placeholder="Optional"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="reg-email">Email</Label>
+              <Input
+                id="reg-email"
+                type="email"
+                placeholder="Optional"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={handleRegister} disabled={busy || !regNumber.trim()}>
+                {busy ? <Spinner className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+                {busy ? 'Registering…' : 'Register'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="h-4 w-4" /> Registered participants
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {regs.length === 0 ? (
+            <p className="px-5 py-8 text-sm text-muted-foreground">
+              No participants registered via registration number yet.
+            </p>
+          ) : (
+            <div className="overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase text-muted-foreground">
+                  <tr className="border-b border-border">
+                    <th className="px-5 py-3 font-medium">Registration no.</th>
+                    <th className="px-5 py-3 font-medium">Name</th>
+                    <th className="px-5 py-3 font-medium">Email</th>
+                    <th className="px-5 py-3 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {regs.map((r) => (
+                    <tr key={r.id} className="border-b border-border/60 last:border-0">
+                      <td className="px-5 py-3 tabular-nums">{r.registration_number ?? '—'}</td>
+                      <td className="px-5 py-3">{r.display_name ?? '—'}</td>
+                      <td className="px-5 py-3">{r.email ?? '—'}</td>
+                      <td className="px-5 py-3">{r.status ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
