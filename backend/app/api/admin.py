@@ -291,6 +291,84 @@ def get_llm_mode(payload: dict = Depends(require_admin)) -> dict:
     return {"mode": mode}
 
 
+class SeedRequest(BaseModel):
+    participant_count: int = 50
+
+
+@router.post("/test/seed")
+def seed_test_data(body: SeedRequest, payload: dict = Depends(require_admin)) -> dict:
+    """Seed the TEST competition with realistic test data."""
+    from app.services import test_seeding_service
+
+    if body.participant_count < 1 or body.participant_count > 1000:
+        raise HTTPException(status_code=400, detail="Participant count must be 1-1000")
+    result = test_seeding_service.seed_test_data(body.participant_count)
+    return {"success": True, **result}
+
+
+@router.post("/test/cleanup")
+def cleanup_test_data(payload: dict = Depends(require_admin)) -> dict:
+    """Clean up all TEST competition data."""
+    from app.services import test_seeding_service
+
+    result = test_seeding_service.cleanup_test_data()
+    return {"success": True, **result}
+
+
+@router.get("/test/status")
+def test_status(payload: dict = Depends(require_admin)) -> dict:
+    """Get current TEST competition stats."""
+    from app.db import db
+
+    store = db()
+    subs = (
+        store.table("pc_submissions")
+        .select("id")
+        .eq("competition_id", "competition_test")
+        .execute()
+        .data
+        or []
+    )
+    sub_ids = [s["id"] for s in subs]
+    responses = 0
+    evaluated = 0
+    if sub_ids:
+        # Response ids in chunks of 100
+        resp_by_sub: list[str] = []
+        for i in range(0, len(sub_ids), 100):
+            chunk = sub_ids[i : i + 100]
+            resp_rows = (
+                store.table("pc_responses")
+                .select("id")
+                .in_("submission_id", chunk)
+                .execute()
+                .data
+                or []
+            )
+            resp_by_sub.extend(r["id"] for r in resp_rows)
+        responses = len(resp_by_sub)
+        if resp_by_sub:
+            evaluated = 0
+            for i in range(0, len(resp_by_sub), 100):
+                chunk = resp_by_sub[i : i + 100]
+                ev_rows = (
+                    store.table("pc_evaluations")
+                    .select("id")
+                    .in_("response_id", chunk)
+                    .execute()
+                    .data
+                    or []
+                )
+                evaluated += len(ev_rows)
+    return {
+        "participants": len(sub_ids),
+        "submissions": len(sub_ids),
+        "responses": responses,
+        "evaluated": evaluated,
+        "pending": responses - evaluated,
+    }
+
+
 class LeaderboardPublishResponse(BaseModel):
     success: bool
     visible: bool
