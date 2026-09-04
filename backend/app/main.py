@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api import admin, auth, competition, leaderboard, submissions
 from app.config import settings
 from app.middleware import setup as setup_middleware
 from app.services import queue_worker
+
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -48,3 +53,17 @@ app.include_router(admin.router)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "app": settings.app_name}
+
+
+# Serve built frontend assets (JS, CSS, images).
+if FRONTEND_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str) -> FileResponse:
+        """Serve the SPA for all non-API routes. Static files take priority
+        via the /assets mount above; everything else falls through here."""
+        file = FRONTEND_DIST / full_path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(FRONTEND_DIST / "index.html")
