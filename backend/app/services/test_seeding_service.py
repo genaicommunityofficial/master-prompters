@@ -1,8 +1,8 @@
 """Seed the TEST competition with realistic prompts for evaluation testing.
 
-Unlike the old stress test (which fired HTTP requests), this service inserts
-data directly into Supabase. It generates realistic ~500-word prompts for each
-of the 5 categories, creating a complete test dataset that mirrors production.
+Rather than firing HTTP requests, this service inserts data directly into
+Supabase. It generates realistic ~500-word prompts for each of the 5 categories,
+creating a complete test dataset that mirrors production.
 """
 from __future__ import annotations
 

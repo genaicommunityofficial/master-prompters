@@ -249,7 +249,7 @@ def get_evaluator() -> Callable:
     Gemini evaluator. Otherwise return the LogOnlyEvaluator. Currently the
     real Gemini client is not wired — so the LogOnlyEvaluator is the default
     until that integration lands. The flag exists so admins can opt-in
-    explicitly for stress tests.
+    explicitly for the test suite.
     """
     from app.config import settings
 
