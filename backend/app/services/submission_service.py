@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import random
+import time
 from typing import Callable
 
 from app.db import db as _db_instance
 from app.services import competition_service as comp_svc
+
+BATCH_SIZE = 10
 
 
 class SubmissionError(Exception):
@@ -228,6 +232,15 @@ class LogOnlyEvaluator(GeminiEvaluator):
             await asyncio.sleep(min(latency_ms, 400) / 1000.0)
         return result
 
+    def batch_evaluate_sync(
+        self, items: list[dict], question: dict, evaluation_config: dict
+    ) -> list[dict]:
+        """Evaluate a batch of prompts sharing the same question/criteria."""
+        return [
+            self.evaluate_sync(item["prompt_text"], question, evaluation_config)
+            for item in items
+        ]
+
 
 def get_evaluator() -> Callable:
     """Pick the appropriate evaluator.
@@ -262,6 +275,113 @@ def run_evaluator(
     if os.getenv("ENABLE_DUMMY_LLM", "1") == "1" or not settings.gemini_api_key:
         return LogOnlyEvaluator().evaluate_sync(prompt_text, question, evaluation_config)
     return asyncio.run(get_evaluator()(prompt_text, question, evaluation_config))
+
+
+def run_batch_evaluator(
+    items: list[dict],
+    question: dict,
+    evaluation_config: dict,
+    criteria_md: str | None = None,
+) -> list[dict]:
+    """Evaluate a batch of prompts that share the same question and criteria.
+
+    Each item must contain at least ``prompt_text``. Returns a list of result
+    dicts in the same order as *items*.
+    """
+    if criteria_md:
+        evaluation_config = {**(evaluation_config or {}), "criteria_md": criteria_md}
+    from app.config import settings
+
+    if os.getenv("ENABLE_DUMMY_LLM", "1") == "1" or not settings.gemini_api_key:
+        return LogOnlyEvaluator().batch_evaluate_sync(items, question, evaluation_config)
+    return _gemini_batch_evaluate(items, question, evaluation_config)
+
+
+def _gemini_batch_evaluate(
+    items: list[dict],
+    question: dict,
+    evaluation_config: dict,
+) -> list[dict]:
+    """Send a batch of prompts to Gemini in a single request.
+
+    All prompts share the same question and criteria. The model scores each
+    prompt independently and returns a JSON array of results.
+    """
+    import google.generativeai as genai
+    from app.config import settings
+
+    genai.configure(api_key=settings.gemini_api_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    criteria_md = evaluation_config.get("criteria_md", "")
+    question_text = question.get("description") or question.get("title") or ""
+
+    prompt_parts: list[str] = []
+    for i, item in enumerate(items):
+        prompt_parts.append(f"--- PROMPT_{i} ---\n{item['prompt_text']}")
+
+    user_content = (
+        f"You are an expert prompt engineer evaluating prompts for a competition.\n\n"
+        f"## Question / Task\n{question_text}\n\n"
+    )
+    if criteria_md:
+        user_content += f"## Evaluation Criteria (Rubric)\n{criteria_md}\n\n"
+    user_content += (
+        "## Prompts to Evaluate\n\n"
+        + "\n\n".join(prompt_parts)
+        + "\n\n"
+        "## Instructions\n"
+        "Evaluate EACH prompt above independently against the criteria.\n"
+        "Return a JSON array with exactly "
+        f"{len(items)} objects, one per prompt, in the same order.\n"
+        "Each object must have exactly these keys:\n"
+        '  - "score": number 0-100 (overall score)\n'
+        '  - "criteria_scores": object with keys matching the rubric dimensions '
+        "(e.g. clarity, specificity, creativity, feasibility) — each a number 0-100\n"
+        '  - "summary": string (one sentence explaining the score)\n\n'
+        "Return ONLY the JSON array. No markdown fences, no extra text.\n"
+    )
+
+    t0 = time.monotonic()
+    response = model.generate_content(user_content)
+    latency_ms = int((time.monotonic() - t0) * 1000)
+
+    raw = response.text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+    parsed = json.loads(raw)
+    if not isinstance(parsed, list) or len(parsed) != len(items):
+        raise ValueError(
+            f"Gemini returned {len(parsed) if isinstance(parsed, list) else '?'} "
+            f"results for {len(items)} prompts"
+        )
+
+    total_input = 0
+    total_output = 0
+    total_thinking = 0
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        um = response.usage_metadata
+        total_input = getattr(um, "prompt_token_count", 0) or 0
+        total_output = getattr(um, "candidates_token_count", 0) or 0
+        total_thinking = getattr(um, "thoughts_token_count", 0) or 0
+
+    per_input = max(1, total_input // len(items))
+    per_output = max(1, total_output // len(items))
+
+    results: list[dict] = []
+    for i, entry in enumerate(parsed):
+        results.append({
+            "score": float(entry.get("score", 0)),
+            "criteria_scores": entry.get("criteria_scores", {}),
+            "summary": entry.get("summary", ""),
+            "model": "gemini-2.5-flash",
+            "input_tokens": per_input,
+            "output_tokens": per_output,
+            "thinking_tokens": max(0, total_thinking // len(items)),
+            "latency_ms": latency_ms,
+        })
+    return results
 
 
 def get_prompts_for_submission(competition_id: str, participant_id: str) -> list[dict]:
