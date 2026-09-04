@@ -251,50 +251,6 @@ def _spawn(**kwargs: Any) -> None:
     thread.start()
 
 
-def run_pipeline(
-    *,
-    competition_id: str,
-    batch_size: int = 8,
-    concurrency: int = 4,
-    max_retries: int = 3,
-) -> dict[str, Any]:
-    """Blocking Start Eval used by the stress harness."""
-    batch_size, concurrency, max_retries = clamp_eval_params(
-        batch_size=batch_size,
-        concurrency=concurrency,
-        max_retries=max_retries,
-    )
-    with _lock:
-        if _state["status"] == "running":
-            snapshot = dict(_state)
-            snapshot["accepted"] = False
-            return snapshot
-        _state.update(
-            {
-                "status": "running",
-                "accepted": True,
-                "competition_id": competition_id,
-                "batch_size": batch_size,
-                "concurrency": concurrency,
-                "max_retries": max_retries,
-                "enqueued": 0,
-                "processed": 0,
-                "completed": 0,
-                "failed": 0,
-                "started_at": time.time(),
-                "finished_at": None,
-                "error_message": None,
-            }
-        )
-    _run_thread(
-        competition_id=competition_id,
-        batch_size=batch_size,
-        concurrency=concurrency,
-        max_retries=max_retries,
-    )
-    return get_status()
-
-
 def _job_counts(competition_id: str) -> tuple[int, int]:
     subs = (
         db()

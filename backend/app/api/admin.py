@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
 from pydantic import BaseModel
 
 from app.security.auth import get_current_admin
@@ -11,8 +11,6 @@ from app.services import eval_criteria_service
 from app.services import eval_run_service
 from app.services import leaderboard_service as lb_svc
 from app.services import request_log_service
-from app.services import stress_cleanup_service
-from app.services import stress_test_service
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -269,65 +267,6 @@ async def upload_criteria(
         file_name=saved["file_name"],
         content_hash=saved["content_hash"],
     )
-
-
-class CleanupResult(BaseModel):
-    deleted_participants: int
-    deleted_submissions: int
-    deleted_responses: int
-    deleted_jobs: int
-    deleted_logs: int
-    deleted_questions: int
-    deleted_competitions: int
-
-
-@router.post("/test/cleanup", response_model=CleanupResult)
-def test_cleanup(payload: dict = Depends(require_admin)) -> CleanupResult:
-    """Delete all TEST competition data (stress-test cleanup). Admin-only."""
-    result = stress_cleanup_service.cleanup_test_data()
-    return CleanupResult(**result)
-
-
-class StressStartRequest(BaseModel):
-    total: int = 50
-    cleanup: bool = False
-    base_url: str | None = None
-
-
-def _infer_stress_base(request: Request, override: str | None) -> str:
-    if override:
-        return override.rstrip("/")
-    from app.config import settings as app_settings
-
-    if app_settings.stress_base_url:
-        return app_settings.stress_base_url.rstrip("/")
-    port = request.url.port
-    host = (request.url.hostname or "127.0.0.1").lower()
-    if host in ("localhost", "127.0.0.1") and port == 5173:
-        return "http://127.0.0.1:8000"
-    if host in ("localhost", "127.0.0.1") and port:
-        return f"{request.url.scheme}://127.0.0.1:{port}"
-    return str(request.base_url).rstrip("/")
-
-
-@router.post("/test/stress")
-def start_stress_test(
-    body: StressStartRequest,
-    request: Request,
-    payload: dict = Depends(require_admin),
-) -> dict:
-    """Start an isolated TEST-competition load run. Rejects overlapping runs."""
-    base = _infer_stress_base(request, body.base_url)
-    return stress_test_service.start(
-        total=body.total,
-        base_url=base,
-        cleanup=body.cleanup,
-    )
-
-
-@router.get("/test/stress")
-def stress_test_status(payload: dict = Depends(require_admin)) -> dict:
-    return stress_test_service.get_status()
 
 
 class LeaderboardPublishResponse(BaseModel):

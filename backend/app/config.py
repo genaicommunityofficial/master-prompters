@@ -46,12 +46,6 @@ class Settings(BaseSettings):
     # The event whose registrations we accept for QR login
     qr_event_id: str = ""
 
-    # Stress test defaults
-    stress_competition_id: str = "competition_test"
-    stress_concurrency: int = 35
-    stress_total: int = 1250
-    stress_base_url: str = ""  # if empty, inferred from the incoming request
-
     @computed_field
     @property
     def cors_origin_list(self) -> list[str]:
