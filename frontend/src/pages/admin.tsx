@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
+  Bot,
+  Cpu,
+  Database,
   Download,
   Eye,
   EyeOff,
@@ -12,6 +15,7 @@ import {
   Play,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -30,16 +34,15 @@ import {
 } from '@/services/api'
 import type {
   Analytics,
-  CleanupResult,
   CriteriaEntry,
   DashboardMetrics,
   EvalLogEntry,
   EvalRunStatus,
   LiveLogsResponse,
-  StressStatus,
+  TestSuiteStatus,
 } from '@/types'
 
-type Tab = 'dashboard' | 'monitor' | 'cost' | 'criteria' | 'export' | 'stress'
+type Tab = 'dashboard' | 'monitor' | 'cost' | 'criteria' | 'export' | 'test'
 
 const API_BASE: string = (import.meta.env.VITE_API_BASE_URL as string) ?? '/api'
 
@@ -290,21 +293,6 @@ export default function AdminPage() {
     }
   }
 
-  const handleCleanup = useCallback(async () => {
-    if (!token) return
-    if (!window.confirm('Delete ALL TEST competition data from Supabase? This runs the mandatory stress-test cleanup.')) {
-      return
-    }
-    try {
-      const res: CleanupResult = await api.adminTestCleanup(token)
-      setExportNote(
-        `Cleanup done: ${res.deleted_participants} participants, ${res.deleted_logs} request logs removed.`,
-      )
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Cleanup failed.')
-    }
-  }, [token])
-
   if (!token) {
     return (
       <AdminShell signedIn={false} onSignOut={handleLogout}>
@@ -384,7 +372,7 @@ export default function AdminPage() {
     { key: 'monitor', label: 'Live monitor' },
     { key: 'cost', label: 'Cost & analytics' },
     { key: 'criteria', label: 'Criteria' },
-    { key: 'stress', label: 'Stress test' },
+    { key: 'test', label: 'Test Suite' },
     { key: 'export', label: 'Export' },
   ]
 
@@ -466,8 +454,8 @@ export default function AdminPage() {
                 )}
                 {evalRun?.status === 'running' ? 'Evaluating…' : 'Start Eval'}
               </Button>
-              <Button size="sm" onClick={() => setPhase('stress')}>
-                <Gauge className="h-4 w-4" /> Stress test
+              <Button size="sm" onClick={() => setPhase('test')}>
+                <Gauge className="h-4 w-4" /> Test Suite
               </Button>
               <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
                 {leaderboardVisible ? (
@@ -607,17 +595,12 @@ export default function AdminPage() {
           <CriteriaPanel token={token} onError={setError} onNote={setExportNote} />
         )}
 
-        {phase === 'stress' && (
-          <StressPanel
-            token={token}
-            onError={setError}
-            onNote={setExportNote}
-            onCleanup={handleCleanup}
-          />
+        {phase === 'test' && (
+          <TestSuitePanel token={token} onError={setError} onNote={setExportNote} />
         )}
 
         {phase === 'export' && (
-          <ExportPanel onError={setError} onNote={setExportNote} onCleanup={handleCleanup} />
+          <ExportPanel onError={setError} onNote={setExportNote} />
         )}
 
         {exportNote ? (
@@ -789,148 +772,177 @@ function CostPanel({ analytics }: { analytics: Analytics | null }) {
   )
 }
 
-function StressPanel({
+function TestSuitePanel({
   token,
   onError,
   onNote,
-  onCleanup,
 }: {
   token: string
   onError: (m: string) => void
   onNote: (m: string) => void
-  onCleanup: () => void
 }) {
-  const [total, setTotal] = useState(300)
-  const [status, setStatus] = useState<StressStatus | null>(null)
-  const [starting, setStarting] = useState(false)
-  const pollRef = useRef<number | null>(null)
+  const [participantCount, setParticipantCount] = useState(50)
+  const [status, setStatus] = useState<TestSuiteStatus | null>(null)
+  const [llmMode, setLlmMode] = useState<'dummy' | 'gemini'>('dummy')
+  const [seeding, setSeeding] = useState(false)
+  const [cleaning, setCleaning] = useState(false)
+  const [evaluating, setEvaluating] = useState(false)
 
   const loadStatus = useCallback(async () => {
     try {
-      const s = await api.adminStressStatus(token)
+      const s = await api.adminTestStatus(token)
       setStatus(s)
-      return s
     } catch (e) {
-      onError(e instanceof Error ? e.message : 'Could not load stress-test status.')
-      return null
+      onError(e instanceof Error ? e.message : 'Could not load test status.')
+    }
+  }, [token, onError])
+
+  const loadLlmMode = useCallback(async () => {
+    try {
+      const m = await api.adminGetLlmMode(token)
+      setLlmMode(m.mode)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not load LLM mode.')
     }
   }, [token, onError])
 
   useEffect(() => {
     loadStatus()
-  }, [loadStatus])
+    loadLlmMode()
+  }, [loadStatus, loadLlmMode])
 
-  useEffect(() => {
-    if (status?.status !== 'running') {
-      if (pollRef.current) window.clearInterval(pollRef.current)
-      pollRef.current = null
-      return
-    }
-    pollRef.current = window.setInterval(() => {
-      void loadStatus()
-    }, 1500)
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current)
-    }
-  }, [status?.status, loadStatus])
-
-  const handleStart = async () => {
-    setStarting(true)
+  const handleSeed = async () => {
+    setSeeding(true)
     try {
-      const s = await api.adminStartStress({ total }, token)
-      setStatus(s)
-      if (s.accepted === false) {
-        onError('A stress test is already running. Wait for it to finish.')
-      } else {
-        onNote(`Stress test started: ${s.total} sequential submissions.`)
-      }
+      const r = await api.adminSeedTestData(participantCount, token)
+      onNote(`Seeded ${r.participants} participants with ${r.responses} prompts.`)
+      await loadStatus()
     } catch (e) {
-      onError(e instanceof Error ? e.message : 'Could not start the stress test.')
+      onError(e instanceof Error ? e.message : 'Seeding failed.')
     } finally {
-      setStarting(false)
+      setSeeding(false)
     }
   }
 
-  const running = status?.status === 'running'
-  const pct =
-    status && status.total > 0 ? Math.min(100, Math.round((status.completed / status.total) * 100)) : 0
+  const handleCleanup = async () => {
+    setCleaning(true)
+    try {
+      await api.adminTestCleanup(token)
+      onNote('Test data cleaned up.')
+      await loadStatus()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Cleanup failed.')
+    } finally {
+      setCleaning(false)
+    }
+  }
 
-  const statusCodes = status?.status_codes ?? {}
+  const handleLlmToggle = async (mode: 'dummy' | 'gemini') => {
+    try {
+      await api.adminSetLlmMode(mode, token)
+      setLlmMode(mode)
+      onNote(`LLM mode set to ${mode}.`)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not set LLM mode.')
+    }
+  }
+
+  const handleEvaluate = async () => {
+    setEvaluating(true)
+    try {
+      await api.adminStartEval({ llm_mode: llmMode }, token)
+      onNote(`Evaluation started with ${llmMode} LLM.`)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not start evaluation.')
+    } finally {
+      setEvaluating(false)
+    }
+  }
+
+  const canEvaluate = status && status.responses > 0
 
   return (
     <div className="mt-8 space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Gauge className="h-4 w-4" /> Isolated TEST competition load
+            <Database className="h-4 w-4" /> Test Database
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Seeds store-only TEST submissions sequentially, un-throttled, then runs Start Eval
-            against that isolated competition. This is the realistic load a single Render free
-            instance sustains when many students submit at once (e.g. 300 students ≈ 300 requests).
-            Live participants are not touched. Clean up TEST rows when you are done.
+            Seed the TEST competition with realistic ~500-word prompts across 5 categories.
+            This dataset mirrors production for realistic evaluation testing.
           </p>
           <div className="max-w-xs space-y-1.5">
-            <Label htmlFor="stress-total">Total submissions (max 1250)</Label>
+            <Label htmlFor="seed-count">Participants (1-1000)</Label>
             <Input
-              id="stress-total"
+              id="seed-count"
               type="number"
               min={1}
-              max={1250}
-              value={total}
-              disabled={running || starting}
-              onChange={(e) => setTotal(Number(e.target.value))}
+              max={1000}
+              value={participantCount}
+              disabled={seeding}
+              onChange={(e) => setParticipantCount(Number(e.target.value))}
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={handleStart} disabled={running || starting}>
-              {starting || running ? <Spinner className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              {running ? 'Running…' : 'Run stress test'}
+            <Button onClick={handleSeed} disabled={seeding}>
+              {seeding ? <Spinner className="h-4 w-4" /> : <Database className="h-4 w-4" />}
+              {seeding ? 'Seeding…' : 'Seed Test Data'}
             </Button>
-            <Button variant="destructive" size="default" onClick={onCleanup} disabled={running}>
-              <Trash2 className="h-4 w-4" /> Clean up TEST data
+            <Button variant="destructive" onClick={handleCleanup} disabled={cleaning}>
+              {cleaning ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+              Clean Up
             </Button>
           </div>
           {status ? (
-            <div className="space-y-3 rounded-lg border border-border p-4" aria-live="polite">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium capitalize">{status.phase ? `${status.status} · ${status.phase}` : status.status}</span>
-                <span className="tabular-nums text-muted-foreground">
-                  {status.completed} / {status.total || '—'}
-                </span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full bg-foreground transition-all duration-300" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-4">
-                <Stat label="Succeeded" value={status.succeeded} />
-                <Stat label="Errors" value={status.errors} />
-                <Stat label="Eval jobs done" value={status.jobs_completed ?? 0} />
-                <Stat label="Eval jobs failed" value={status.jobs_failed ?? 0} />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Stat label="Avg latency (ms)" value={status.avg_latency_ms} />
-                <Stat label="Max latency (ms)" value={status.max_latency_ms} />
-                <Stat label="p95 latency (ms)" value={status.p95_latency_ms} />
-              </div>
-              {Object.keys(statusCodes).length > 0 ? (
-                <div className="text-xs text-muted-foreground">
-                  Status codes:{' '}
-                  {Object.entries(statusCodes)
-                    .sort((a, b) => Number(a[0]) - Number(b[0]))
-                    .map(([code, n]) => `${code}: ${n}`)
-                    .join('  ·  ')}
-                </div>
-              ) : null}
-              {status.error_message ? (
-                <p className="text-sm text-destructive">{status.error_message}</p>
-              ) : null}
+            <div className="grid gap-3 sm:grid-cols-4 text-sm">
+              <Stat label="Participants" value={status.participants} />
+              <Stat label="Responses" value={status.responses} />
+              <Stat label="Evaluated" value={status.evaluated} />
+              <Stat label="Pending" value={status.pending} />
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No run yet. Start a test to see live progress here.</p>
+            <p className="text-sm text-muted-foreground">No test data yet. Seed to get started.</p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Cpu className="h-4 w-4" /> LLM Mode
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Choose which LLM evaluates the prompts. Dummy mode is instant and deterministic.
+            Gemini mode uses the real API key and takes a few minutes for large datasets.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={llmMode === 'dummy' ? 'default' : 'outline'}
+              onClick={() => handleLlmToggle('dummy')}
+            >
+              <Bot className="h-4 w-4" /> Dummy LLM
+            </Button>
+            <Button
+              variant={llmMode === 'gemini' ? 'default' : 'outline'}
+              onClick={() => handleLlmToggle('gemini')}
+            >
+              <Sparkles className="h-4 w-4" /> Gemini Flash
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleEvaluate} disabled={evaluating || !canEvaluate}>
+              {evaluating ? <Spinner className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              {evaluating ? 'Evaluating…' : 'Run Evaluation'}
+            </Button>
+          </div>
+          {!canEvaluate ? (
+            <p className="text-xs text-muted-foreground">Seed test data before running evaluation.</p>
+          ) : null}
         </CardContent>
       </Card>
     </div>
@@ -1080,11 +1092,9 @@ function CriteriaPanel({
 function ExportPanel({
   onError,
   onNote,
-  onCleanup,
 }: {
   onError: (m: string) => void
   onNote: (m: string) => void
-  onCleanup: () => void
 }) {
   const categories = [
     { n: 1, label: 'Meme Generation' },
@@ -1135,23 +1145,6 @@ function ExportPanel({
             <Download className="h-4 w-4 text-muted-foreground" />
           </button>
         ))}
-      </div>
-
-      <div className="mt-6 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-        <div className="flex items-start gap-2">
-          <Trash2 className="mt-0.5 h-4 w-4 text-destructive" />
-          <div>
-            <div className="font-medium text-destructive">Stress-test cleanup</div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Deletes every row belonging to the isolated TEST competition (
-              participants, submissions, responses, evaluations, jobs, request
-              logs). Run after a load test to leave Supabase pristine.
-            </p>
-            <Button variant="destructive" size="sm" className="mt-3" onClick={onCleanup}>
-              Clean up TEST data
-            </Button>
-          </div>
-        </div>
       </div>
     </div>
   )

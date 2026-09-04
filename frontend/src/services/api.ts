@@ -11,11 +11,13 @@ import type {
   LeaderboardResponse,
   LiveLogsResponse,
   LiveStats,
+  LlmModeResponse,
   PromptInput,
-  StressStatus,
+  SeedResult,
   SubmissionReceipt,
   EvalLogEntry,
   EvalRunStatus,
+  TestSuiteStatus,
 } from '@/types'
 
 const API_BASE: string = (import.meta.env.VITE_API_BASE_URL as string) ?? '/api'
@@ -142,6 +144,7 @@ export const api = {
       batch_size?: number
       concurrency?: number
       max_retries?: number
+      llm_mode?: string
     },
     token?: string,
   ) =>
@@ -170,17 +173,22 @@ export const api = {
     request<{ analytics: Analytics }>('/admin/analytics', {}, token ?? getAdminToken()),
   adminTestCleanup: (token?: string) =>
     request<CleanupResult>('/admin/test/cleanup', { method: 'POST' }, token ?? getAdminToken()),
-  adminStartStress: (
-    body: { total: number; cleanup?: boolean },
-    token?: string,
-  ) =>
-    request<StressStatus>(
-      '/admin/test/stress',
-      { method: 'POST', body: JSON.stringify(body) },
+  adminSeedTestData: (participantCount: number, token?: string) =>
+    request<SeedResult>(
+      '/admin/test/seed',
+      { method: 'POST', body: JSON.stringify({ participant_count: participantCount }) },
       token ?? getAdminToken(),
     ),
-  adminStressStatus: (token?: string) =>
-    request<StressStatus>('/admin/test/stress', {}, token ?? getAdminToken()),
+  adminTestStatus: (token?: string) =>
+    request<TestSuiteStatus>('/admin/test/status', {}, token ?? getAdminToken()),
+  adminGetLlmMode: (token?: string) =>
+    request<LlmModeResponse>('/admin/test/llm-mode', {}, token ?? getAdminToken()),
+  adminSetLlmMode: (mode: 'dummy' | 'gemini', token?: string) =>
+    request<LlmModeResponse>(
+      '/admin/test/llm-mode',
+      { method: 'POST', body: JSON.stringify({ mode }) },
+      token ?? getAdminToken(),
+    ),
   adminPublishLeaderboard: (token?: string) =>
     request<{ success: boolean; visible: boolean }>('/admin/leaderboard/publish', { method: 'POST' }, token ?? getAdminToken()),
   adminUnpublishLeaderboard: (token?: string) =>

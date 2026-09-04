@@ -173,35 +173,33 @@ export interface Analytics {
   per_category: Record<string, CategoryStat>
 }
 
-export interface CleanupResult {
-  deleted_participants: number
-  deleted_submissions: number
-  deleted_responses: number
-  deleted_jobs: number
-  deleted_logs: number
-  deleted_questions: number
-  deleted_competitions: number
+export interface TestSuiteStatus {
+  participants: number
+  submissions: number
+  responses: number
+  evaluated: number
+  pending: number
 }
 
-export interface StressStatus {
-  status: 'idle' | 'running' | 'completed' | 'failed' | string
-  accepted?: boolean
-  started_at: number | null
-  finished_at: number | null
-  total: number
-  completed: number
-  succeeded: number
-  errors: number
-  req_per_s: number
-  avg_latency_ms: number
-  max_latency_ms?: number
-  p95_latency_ms?: number
-  status_codes?: Record<number, number>
-  error_message: string | null
-  phase?: string
-  jobs_enqueued?: number
-  jobs_completed?: number
-  jobs_failed?: number
+export interface LlmModeResponse {
+  mode: 'dummy' | 'gemini'
+  message?: string
+}
+
+export interface SeedResult {
+  success: boolean
+  participants: number
+  submissions: number
+  responses: number
+}
+
+export interface CleanupResult {
+  success: boolean
+  participants: number
+  submissions: number
+  responses: number
+  jobs: number
+  evaluations: number
 }
 
 export interface CriteriaEntry {
