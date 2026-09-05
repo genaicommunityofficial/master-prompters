@@ -9,7 +9,7 @@ Live competition id: `competition_2026`. Isolated eval sandbox: `competition_tes
 
 ## What participants write
 
-One prompt per category. **Each prompt must be 20–500 characters** (leading and
+One prompt per category. **Each prompt must be 20–2000 characters** (leading and
 trailing spaces ignored). The write form, review/submit screen, FastAPI
 validators, and Supabase submit RPCs all enforce that window.
 
@@ -64,7 +64,7 @@ sequenceDiagram
   P->>SPA: Registration number + QR
   SPA->>SB: pc_login_prepare / pc_login
   SB-->>SPA: Session token
-  P->>SPA: Write 5 prompts (20–500 chars)
+  P->>SPA: Write 5 prompts (20–2000 chars)
   SPA->>SB: pc_submit / pc_submit_one
   Note over SB: Stored as SUBMITTED.<br/>No Gemini call here.
   P->>SPA: Open /leaderboard
@@ -74,7 +74,7 @@ sequenceDiagram
 1. Enter the event registration number, then scan or paste the QR (`GENAI_QR_...`).
 2. The QR is matched against the existing `registrations` table (read-only).
 3. Write all five categories. Drafts stay in the browser until submit.
-4. Review lists the 20–500 character rule and each category description.
+4. Review lists the 20–2000 character rule and each category description.
 5. Confirm once. Evaluation starts only when an administrator runs it.
 
 A pipeline tester account can sign in with registration number only and is
@@ -121,7 +121,7 @@ erDiagram
 | Table | Role |
 |---|---|
 | `pc_competitions` | Live (`competition_2026`) and TEST (`competition_test`) |
-| `pc_questions` | Five categories; `min_length=20`, `max_length=500` |
+| `pc_questions` | Five categories; `min_length=20`, `max_length=2000` |
 | `pc_participants` | Mapped from QR registrations |
 | `pc_submissions` | One per participant |
 | `pc_responses` | Five prompts per submission |
@@ -143,7 +143,7 @@ erDiagram
 frontend/          React + Vite SPA
 backend/           FastAPI admin + evaluator
 supabase/
-  migrations/      0000_full_setup.sql plus additive 0001…0009
+  migrations/      0000_full_setup.sql plus additive 0001…0011
 scripts/
   apply_db.py      optional direct DB apply (needs DATABASE_URL)
   populate_test_dataset.py   seed TEST competition
@@ -155,9 +155,9 @@ docs/
 ## Quick start
 
 See [docs/SETUP.md](docs/SETUP.md). Paste **`supabase/migrations/`** in order
-(`0000` … `0009`) into the Supabase SQL editor. Existing event tables are
+(`0000` … `0011`) into the Supabase SQL editor. Existing event tables are
 untouched. `0005` + `0007` are required before the Vercel participant site can
-log in or submit. `0009` is required for the 20–500 character limits on an
+log in or submit. `0010` is required for the 20–2000 character limits on an
 already-seeded project.
 
 ```bash
@@ -179,7 +179,11 @@ local or the Vercel deployment.
 
 - `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` are laptop/backend only.
 - RLS on all new tables. The Vercel app only has the anon key and SECURITY
-  DEFINER RPCs (`pc_login_*`, `pc_submit*`, `pc_public_leaderboard`).
+  DEFINER RPCs (`pc_login_*`, `pc_submit*`, `pc_logout`, `pc_public_leaderboard`).
+- One live session per registration (8 hours, or until **Sign out**). A second
+  device is refused until that session expires. Pipeline testers can re-login.
+- Saved prompts are frozen: the first write sticks; a later login cannot change
+  that text. Identical retries still succeed.
 - Admin is a separate username/password login (bcrypt-verified, rate-limited)
   that mints a `role=admin` JWT. Use `/admin` on localhost with a Live / Test
   mode switch.
@@ -196,7 +200,7 @@ cd backend && .venv/Scripts/python.exe ../scripts/e2e_production_test.py --mode 
 ```
 
 Populate the isolated TEST competition from CLI only (prompts are fitted to
-20–500 characters):
+20–2000 characters):
 
 ```bash
 python scripts/populate_test_dataset.py --total 300

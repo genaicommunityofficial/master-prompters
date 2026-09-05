@@ -3,15 +3,24 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from app.schemas.schemas import AuthResponse, LoginPrepareResponse, QrLoginRequest, ParticipantInfo
 from app.security.auth import get_current_participant
 from app.services import auth_service
 from app.services.auth_service import AuthError
+from app.services.session_guard import ALREADY_SIGNED_IN_MSG
 from app.services.qr_service import QrDecodeError, decode_qr_image
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+_bearer = HTTPBearer(auto_error=False)
+
+
+def _auth_http(exc: AuthError) -> HTTPException:
+    detail = str(exc)
+    code = 409 if detail == ALREADY_SIGNED_IN_MSG else 401
+    return HTTPException(status_code=code, detail=detail)
 
 
 def _login(competition_id: str, qr_message: str, registration_number: str) -> AuthResponse:
@@ -22,7 +31,7 @@ def _login(competition_id: str, qr_message: str, registration_number: str) -> Au
             registration_number=registration_number,
         )
     except AuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise _auth_http(exc) from exc
     return AuthResponse(
         token=result["token"],
         participant=ParticipantInfo(**result["participant"]),
@@ -70,7 +79,7 @@ async def registration_number_login(body: RegistrationNumberLoginRequest) -> Log
             competition_id=body.competition_id,
         )
     except AuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise _auth_http(exc) from exc
     participant = result.get("participant")
     return LoginPrepareResponse(
         requires_qr=bool(result.get("requires_qr")),
@@ -78,6 +87,19 @@ async def registration_number_login(body: RegistrationNumberLoginRequest) -> Log
         participant=ParticipantInfo(**participant) if participant else None,
         display_name=result.get("display_name"),
     )
+
+
+@router.post("/logout")
+async def logout(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    payload: dict = Depends(get_current_participant),
+) -> dict:
+    token = credentials.credentials if credentials else ""
+    try:
+        auth_service.logout(payload["sub"], token)
+    except AuthError as exc:
+        raise _auth_http(exc) from exc
+    return {"ok": True}
 
 
 @router.get("/me", response_model=dict)

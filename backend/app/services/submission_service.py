@@ -7,6 +7,7 @@ import time
 from app.db import db as _db_instance
 from app.services import competition_service as comp_svc
 from app.services.eval_cost import estimate_cost_usd
+from app.services.session_guard import PROMPT_FROZEN_MSG, frozen_prompt_action
 
 _THINKING_LEVELS = frozenset({"minimal", "low", "medium", "high"})
 _gemini_lock = threading.Lock()
@@ -102,7 +103,7 @@ def validate_submission(competition: dict, questions: list[dict], prompts: list[
     if len(prompts) != 5:
         raise SubmissionError("Exactly five responses are required.")
 
-    max_length = competition.get("max_submission_length") or 500
+    max_length = competition.get("max_submission_length") or 2000
 
     q_by_id = {q["id"]: q for q in questions}
     for p in prompts:
@@ -193,11 +194,11 @@ def create_submission(
 
 
 def _upsert_response(sub_id: str, prompt: dict) -> None:
-    """Insert or update one response row for a submission."""
+    """Insert a response, or no-op if the same text is already stored. Edits are rejected."""
     existing_response = (
         db()
         .table("pc_responses")
-        .select("id")
+        .select("id, prompt_text")
         .eq("submission_id", sub_id)
         .eq("question_id", prompt["question_id"])
         .limit(1)
@@ -205,26 +206,23 @@ def _upsert_response(sub_id: str, prompt: dict) -> None:
         .data
         or []
     )
+    existing_text = existing_response[0].get("prompt_text") if existing_response else None
+    action = frozen_prompt_action(existing_text, prompt["prompt_text"])
+    if action == "keep":
+        return
+    if action == "reject":
+        raise SubmissionError(PROMPT_FROZEN_MSG)
     payload = {
         "prompt_text": prompt["prompt_text"],
         "word_count": _word_count(prompt["prompt_text"]),
         "token_estimate": _estimate_tokens(prompt["prompt_text"]),
     }
-    if existing_response:
-        (
-            db()
-            .table("pc_responses")
-            .update(payload)
-            .eq("id", existing_response[0]["id"])
-            .execute()
-        )
-    else:
-        (
-            db()
-            .table("pc_responses")
-            .insert({"submission_id": sub_id, "question_id": prompt["question_id"], **payload})
-            .execute()
-        )
+    (
+        db()
+        .table("pc_responses")
+        .insert({"submission_id": sub_id, "question_id": prompt["question_id"], **payload})
+        .execute()
+    )
 
 
 def _refresh_submission_state(sub: dict, participant_id: str) -> dict:
@@ -602,49 +600,7 @@ def get_or_create_draft_submission(
         submission = submission[0]
 
     sub_id = submission["id"]
-
-    # Check if this question already has a response
-    existing_response = (
-        db()
-        .table("pc_responses")
-        .select("id")
-        .eq("submission_id", sub_id)
-        .eq("question_id", prompt_data["question_id"])
-        .limit(1)
-        .execute()
-        .data
-    )
-
-    if existing_response:
-        # Update existing response
-        updated = (
-            db()
-            .table("pc_responses")
-            .update({
-                "prompt_text": prompt_data["prompt_text"],
-                "word_count": _word_count(prompt_data["prompt_text"]),
-                "token_estimate": _estimate_tokens(prompt_data["prompt_text"]),
-            })
-            .eq("submission_id", sub_id)
-            .eq("question_id", prompt_data["question_id"])
-            .execute()
-            .data
-        )
-    else:
-        # Insert new response
-        response = (
-            db()
-            .table("pc_responses")
-            .insert({
-                "submission_id": sub_id,
-                "question_id": prompt_data["question_id"],
-                "prompt_text": prompt_data["prompt_text"],
-                "word_count": _word_count(prompt_data["prompt_text"]),
-                "token_estimate": _estimate_tokens(prompt_data["prompt_text"]),
-            })
-            .execute()
-            .data
-        )
+    _upsert_response(sub_id, prompt_data)
 
     # Check if all 5 questions have been answered
     responses = (

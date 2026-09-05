@@ -86,7 +86,7 @@ async def submit_individual(
             status_code=400,
             detail=f"'{question['title']}' must be at least {question.get('min_length')} characters.",
         )
-    max_length = int(question.get("max_length") or comp.get("max_submission_length") or 500)
+    max_length = int(question.get("max_length") or comp.get("max_submission_length") or 2000)
     if len(prompt_text) > max_length:
         raise HTTPException(
             status_code=400,
@@ -126,34 +126,13 @@ async def submit_individual(
         sub_id = submission["id"]
 
     prompt_text = (body.prompt_text or "").strip()
-
-    # Check if this question already has a response
-    existing_response = (
-        db.table("pc_responses")
-        .select("id")
-        .eq("submission_id", sub_id)
-        .eq("question_id", body.question_id)
-        .limit(1)
-        .execute()
-        .data
-    )
-
-    if existing_response:
-        # Update existing response
-        db.table("pc_responses").update({
-            "prompt_text": prompt_text,
-            "word_count": sub_svc._word_count(prompt_text),
-            "token_estimate": sub_svc._estimate_tokens(prompt_text),
-        }).eq("submission_id", sub_id).eq("question_id", body.question_id).execute()
-    else:
-        # Insert new response
-        db.table("pc_responses").insert({
-            "submission_id": sub_id,
-            "question_id": body.question_id,
-            "prompt_text": prompt_text,
-            "word_count": sub_svc._word_count(prompt_text),
-            "token_estimate": sub_svc._estimate_tokens(prompt_text),
-        }).execute()
+    try:
+        sub_svc._upsert_response(
+            sub_id,
+            {"question_id": body.question_id, "prompt_text": prompt_text},
+        )
+    except SubmissionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     # Check if all 5 questions have been answered
     responses = (

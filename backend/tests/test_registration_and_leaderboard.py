@@ -52,6 +52,33 @@ class TestRegistrationNumberLogin:
         assert result["participant"]["display_name"] == "Ada Lovelace"
 
     @patch("app.services.auth_service.db")
+    def test_second_login_blocked_while_session_live(self, mock_db):
+        store = MagicMock()
+        mock_db.return_value = store
+        comp = MagicMock()
+        comp.data = [{"status": "OPEN", "qr_event_id": None}]
+        part = MagicMock()
+        part.data = [
+            _participant(
+                is_pipeline_tester=False,
+                qr_token="GENAI_QR_MANUAL_X",
+                session_token_hash="abc",
+                session_expires_at="2099-01-01T00:00:00+00:00",
+            )
+        ]
+        nosub = MagicMock()
+        nosub.data = []
+
+        store.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = comp
+        store.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.side_effect = [
+            part,
+            nosub,
+        ]
+
+        with pytest.raises(AuthError, match="already signed in"):
+            login_with_registration_number("23BCE0001", "competition_2026")
+
+    @patch("app.services.auth_service.db")
     def test_event_registrant_requires_qr(self, mock_db):
         store = MagicMock()
         mock_db.return_value = store

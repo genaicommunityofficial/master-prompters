@@ -7,6 +7,12 @@ from app.config import settings
 from app.db import db
 from app.security.auth import create_participant_token
 from app.services.admin_registration_service import MANUAL_QR_PREFIX, normalize_reg
+from app.services.session_guard import (
+    ALREADY_SIGNED_IN_MSG,
+    hash_session_token,
+    session_blocks_new_login,
+    session_expiry_iso,
+)
 
 
 class AuthError(Exception):
@@ -145,20 +151,27 @@ def ensure_participant(competition_id: str, reg: dict) -> dict:
 
 
 def has_submission(participant_id: str, competition_id: str) -> bool:
+    return submission_status(participant_id, competition_id) is not None
+
+
+def submission_status(participant_id: str, competition_id: str) -> str | None:
     sub = (
         db()
         .table("pc_submissions")
-        .select("id")
+        .select("status")
         .eq("participant_id", participant_id)
         .eq("competition_id", competition_id)
         .limit(1)
         .execute()
     )
-    return bool(sub.data)
+    rows = sub.data or []
+    if not rows:
+        return None
+    return rows[0].get("status")
 
 
-def stamp_login(participant_id: str) -> None:
-    """Bump login_count and set last_login_at for the participant."""
+def stamp_login(participant_id: str, token: str | None = None) -> None:
+    """Bump login_count and record the active session hash + expiry."""
     try:
         cur = (
             db()
@@ -170,15 +183,17 @@ def stamp_login(participant_id: str) -> None:
         )
         rows = cur.data or []
         current = int((rows[0].get("login_count") or 0)) if rows else 0
+        payload: dict = {
+            "login_count": current + 1,
+            "last_login_at": "now()",
+        }
+        if token:
+            payload["session_token_hash"] = hash_session_token(token)
+            payload["session_expires_at"] = session_expiry_iso()
         (
             db()
             .table("pc_participants")
-            .update(
-                {
-                    "login_count": current + 1,
-                    "last_login_at": "now()",
-                }
-            )
+            .update(payload)
             .eq("id", participant_id)
             .execute()
         )
@@ -186,18 +201,48 @@ def stamp_login(participant_id: str) -> None:
         pass
 
 
+def logout(participant_id: str, token: str) -> None:
+    row = (
+        db()
+        .table("pc_participants")
+        .select("session_token_hash")
+        .eq("id", participant_id)
+        .limit(1)
+        .execute()
+    )
+    rows = row.data or []
+    stored = rows[0].get("session_token_hash") if rows else None
+    if stored and stored != hash_session_token(token):
+        raise AuthError("Please sign in again.")
+    (
+        db()
+        .table("pc_participants")
+        .update(
+            {
+                "session_token_hash": None,
+                "session_expires_at": None,
+            }
+        )
+        .eq("id", participant_id)
+        .execute()
+    )
+
+
 def _ensure_competition_open(competition_id: str) -> None:
     _ensure_accepting_logins(_load_competition(competition_id))
 
 
 def _issue_session(competition_id: str, participant: dict, *, registration_number: str | None) -> dict:
-    stamp_login(participant["id"])
-    already_submitted = has_submission(participant["id"], competition_id)
+    status = submission_status(participant["id"], competition_id)
+    if session_blocks_new_login(participant, status):
+        raise AuthError(ALREADY_SIGNED_IN_MSG)
     jwt_token = create_participant_token(
         competition_id=competition_id,
         participant_id=participant["id"],
         qr_token=participant["qr_token"],
     )
+    stamp_login(participant["id"], jwt_token)
+    already = status is not None
     return {
         "requires_qr": False,
         "token": jwt_token,
@@ -207,7 +252,7 @@ def _issue_session(competition_id: str, participant: dict, *, registration_numbe
             "display_name": participant.get("display_name") or "Participant",
             "email": participant.get("email"),
             "vit_registration_number": registration_number or participant.get("registration_number"),
-            "already_submitted": already_submitted,
+            "already_submitted": already,
         },
         "display_name": participant.get("display_name") or "Participant",
     }

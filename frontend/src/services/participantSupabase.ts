@@ -56,7 +56,7 @@ function toQuestion(row: QuestionRow) {
     question_number: number,
     title: row.title || `Question ${number}`,
     description: row.description,
-    max_length: row.max_length ?? 500,
+    max_length: row.max_length ?? 2000,
     min_length: row.min_length ?? 20,
   }
 }
@@ -142,6 +142,11 @@ export const participantSupabase = {
 
   submissionExists: (token: string | null) =>
     rpc<{ submitted: boolean }>('pc_submission_exists', {
+      p_session_token: token,
+    }),
+
+  logout: (token: string | null) =>
+    rpc<{ ok: boolean }>('pc_logout', {
       p_session_token: token,
     }),
 

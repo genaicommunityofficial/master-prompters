@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { COMMUNITY_LINE, COMPETITION_NAME } from '@/lib/brand'
 import { useSession } from '@/store/session'
 import { adminNavLinks, participantNavLinks } from '@/lib/nav'
-import { clearSession, getToken } from '@/services/api'
+import { clearSession, getToken, api } from '@/services/api'
 import { cn } from '@/lib/utils'
 
 function BrandLockup({ to }: { to: string }) {
@@ -99,7 +99,12 @@ export function SiteHeader({ className }: { className?: string }) {
   const token = useSession((s) => s.token) ?? getToken()
   const name = useSession((s) => s.displayName)
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await api.logout()
+    } catch {
+      // Still clear the browser so this device is signed out.
+    }
     clearSession()
     useSession.getState().clear()
     nav('/')

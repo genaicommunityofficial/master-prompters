@@ -133,6 +133,10 @@ export const api = {
             registration_number: registrationNumber,
           }),
         }),
+  logout: () =>
+    usesDirectSupabase()
+      ? participantSupabase.logout(getToken())
+      : request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
   submit: (competitionId: string, prompts: PromptInput[]) =>
     usesDirectSupabase()
       ? participantSupabase.submit(competitionId, prompts, getToken())
