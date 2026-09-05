@@ -1,11 +1,40 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 from app.db import db as _db_instance
 from app.services import competition_service as comp_svc
 from app.services.eval_cost import estimate_cost_usd
+
+_THINKING_LEVELS = frozenset({"minimal", "low", "medium", "high"})
+_gemini_lock = threading.Lock()
+_gemini_client: object | None = None
+_gemini_client_key: tuple[str, int] | None = None
+
+# Gemini Developer API rejects JSON Schema `additionalProperties` (which Pydantic
+# emits for dict[str, float]). Use an array of named scores instead.
+JUDGE_RESPONSE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "number"},
+        "criteria_scores": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "score": {"type": "number"},
+                },
+                "required": ["name", "score"],
+            },
+        },
+        "summary": {"type": "string"},
+    },
+    "required": ["score", "criteria_scores", "summary"],
+}
+
 
 BATCH_SIZE = 10
 
@@ -73,7 +102,7 @@ def validate_submission(competition: dict, questions: list[dict], prompts: list[
     if len(prompts) != 5:
         raise SubmissionError("Exactly five responses are required.")
 
-    max_length = competition.get("max_submission_length") or 4000
+    max_length = competition.get("max_submission_length") or 500
 
     q_by_id = {q["id"]: q for q in questions}
     for p in prompts:
@@ -237,6 +266,63 @@ def gemini_model_name() -> str:
     return name or "gemini-3.6-flash"
 
 
+def gemini_thinking_level() -> str:
+    """Gemini 3 thinking depth. Default minimal keeps judge JSON fast and cheap."""
+    from app.config import settings
+
+    raw = str(getattr(settings, "gemini_thinking_level", "") or "minimal").strip().lower()
+    return raw if raw in _THINKING_LEVELS else "minimal"
+
+
+def gemini_max_output_tokens() -> int:
+    from app.config import settings
+
+    try:
+        value = int(getattr(settings, "gemini_max_output_tokens", 512) or 512)
+    except (TypeError, ValueError):
+        return 512
+    return max(64, min(value, 2048))
+
+
+def gemini_request_timeout_ms() -> int:
+    from app.config import settings
+
+    try:
+        value = int(getattr(settings, "gemini_request_timeout_ms", 60_000) or 60_000)
+    except (TypeError, ValueError):
+        return 60_000
+    return max(5_000, min(value, 180_000))
+
+
+def _reset_gemini_client() -> None:
+    """Drop the cached client (tests, or after API key rotation)."""
+    global _gemini_client, _gemini_client_key
+    with _gemini_lock:
+        _gemini_client = None
+        _gemini_client_key = None
+
+
+def _get_gemini_client():
+    """Reuse one google-genai Client per process (and per API key / timeout)."""
+    global _gemini_client, _gemini_client_key
+    from google import genai
+    from google.genai import types
+
+    from app.config import settings
+
+    api_key = str(getattr(settings, "gemini_api_key", "") or "")
+    timeout_ms = gemini_request_timeout_ms()
+    key = (api_key, timeout_ms)
+    with _gemini_lock:
+        if _gemini_client is None or _gemini_client_key != key:
+            _gemini_client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=timeout_ms),
+            )
+            _gemini_client_key = key
+        return _gemini_client
+
+
 def ensure_gemini_configured() -> None:
     """Raises EvalConfigError unless a real Gemini API key is configured."""
     from app.config import settings
@@ -246,6 +332,31 @@ def ensure_gemini_configured() -> None:
             "Gemini API key is not configured on the server. "
             "Set GEMINI_API_KEY before starting an evaluation run."
         )
+
+
+def _judge_system_instruction(question: dict, criteria_md: str) -> str:
+    """Stable prefix: role, task, rubric, JSON rules. Participant prompt is user content."""
+    question_text = question.get("description") or question.get("title") or ""
+    parts = [
+        "You are an expert prompt engineer evaluating one competition prompt.",
+        "",
+        f"## Question / Task\n{question_text}",
+    ]
+    if criteria_md:
+        parts.extend(["", f"## Evaluation Criteria (Rubric)\n{criteria_md}"])
+    parts.extend(
+        [
+            "",
+            "## Instructions",
+            "Score this prompt independently against the criteria. Do not compare it to other prompts.",
+            "Return a JSON object with exactly these keys:",
+            '  - "score": number 0-100 (overall score)',
+            '  - "criteria_scores": array of objects {"name": rubric dimension, "score": number 0-100}',
+            '  - "summary": string (one sentence explaining the score)',
+            "Return ONLY the JSON object.",
+        ]
+    )
+    return "\n".join(parts)
 
 
 def run_evaluator(
@@ -306,6 +417,8 @@ def run_batch_evaluator(
 def _is_retryable_gemini_error(exc: Exception) -> bool:
     name = type(exc).__name__.lower()
     msg = str(exc).lower()
+    if "additionalproperties" in msg or "not in gemini developer api" in msg:
+        return False
     tokens = (
         "429",
         "resource exhausted",
@@ -327,66 +440,79 @@ def _is_retryable_gemini_error(exc: Exception) -> bool:
     } or any(tok in msg for tok in tokens)
 
 
+def _normalize_criteria_scores(raw: object) -> dict[str, float]:
+    """Accept Gemini array [{name, score}] or a legacy {dimension: score} object."""
+    out: dict[str, float] = {}
+    if isinstance(raw, dict):
+        items = raw.items()
+        for key, value in items:
+            try:
+                out[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return out
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("criterion") or item.get("key")
+            score = item.get("score")
+            if name is None or score is None:
+                continue
+            try:
+                out[str(name)] = float(score)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 def _gemini_evaluate_one(
     item: dict,
     question: dict,
     evaluation_config: dict,
 ) -> dict:
     """One competition prompt → one Gemini JSON score. Retries transient API errors."""
-    import google.generativeai as genai
-    from app.config import settings
+    from google.genai import types
 
-    genai.configure(api_key=settings.gemini_api_key)
     model_name = gemini_model_name()
-    model = genai.GenerativeModel(
-        model_name,
-        generation_config={
-            "temperature": 0,
-            "response_mime_type": "application/json",
-        },
-    )
-
-    criteria_md = evaluation_config.get("criteria_md", "")
-    question_text = question.get("description") or question.get("title") or ""
+    client = _get_gemini_client()
+    criteria_md = evaluation_config.get("criteria_md", "") or ""
     prompt_text = item["prompt_text"]
-
-    user_content = (
-        "You are an expert prompt engineer evaluating one competition prompt.\n\n"
-        f"## Question / Task\n{question_text}\n\n"
-    )
-    if criteria_md:
-        user_content += f"## Evaluation Criteria (Rubric)\n{criteria_md}\n\n"
-    user_content += (
-        f"## Prompt to Evaluate\n{prompt_text}\n\n"
-        "## Instructions\n"
-        "Score this prompt independently against the criteria. Do not compare it to other prompts.\n"
-        "Return a JSON object with exactly these keys:\n"
-        '  - "score": number 0-100 (overall score)\n'
-        '  - "criteria_scores": object with keys matching the rubric dimensions '
-        "(e.g. clarity, specificity, creativity, feasibility) — each a number 0-100\n"
-        '  - "summary": string (one sentence explaining the score)\n'
-        "Return ONLY the JSON object.\n"
+    system_instruction = _judge_system_instruction(question, criteria_md)
+    config = types.GenerateContentConfig(
+        temperature=0,
+        response_mime_type="application/json",
+        max_output_tokens=gemini_max_output_tokens(),
+        system_instruction=system_instruction,
+        thinking_config=types.ThinkingConfig(thinking_level=gemini_thinking_level()),
+        response_schema=JUDGE_RESPONSE_SCHEMA,
     )
 
     last_exc: Exception | None = None
     raw = ""
     latency_ms = 0
     response = None
+    parsed: dict = {}
     for attempt in range(4):
         t0 = time.monotonic()
         try:
-            response = model.generate_content(user_content)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt_text,
+                config=config,
+            )
             latency_ms = int((time.monotonic() - t0) * 1000)
-            raw = (response.text or "").strip()
+            raw = (getattr(response, "text", None) or "").strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                if len(parsed) != 1 or not isinstance(parsed[0], dict):
+            parsed_obj = json.loads(raw)
+            if isinstance(parsed_obj, list):
+                if len(parsed_obj) != 1 or not isinstance(parsed_obj[0], dict):
                     raise ValueError("Gemini returned a JSON array instead of one score object")
-                parsed = parsed[0]
-            if not isinstance(parsed, dict):
+                parsed_obj = parsed_obj[0]
+            if not isinstance(parsed_obj, dict):
                 raise ValueError("Gemini returned JSON that is not an object")
+            parsed = parsed_obj
             break
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
@@ -410,7 +536,7 @@ def _gemini_evaluate_one(
     score = max(0.0, min(100.0, score))
     res = {
         "score": score,
-        "criteria_scores": parsed.get("criteria_scores") or {},
+        "criteria_scores": _normalize_criteria_scores(parsed.get("criteria_scores")),
         "summary": parsed.get("summary") or "",
         "model": model_name,
         "input_tokens": max(1, int(total_input)),

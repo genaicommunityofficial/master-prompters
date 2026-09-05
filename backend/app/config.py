@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Gemini (used by the evaluator; key is server-side only)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.6-flash"
+    gemini_thinking_level: str = "minimal"  # minimal | low | medium | high
+    gemini_max_output_tokens: int = 512
+    gemini_request_timeout_ms: int = 60_000
 
     # Auth / JWT
     jwt_secret: str = "change-me-in-production"

@@ -542,12 +542,15 @@ def _run_thread(
 
         processed = 0
         idle_rounds = 0
+        completed, failed = _job_counts(competition_id)
+        _set(processed=processed, completed=completed, failed=failed)
 
         def on_progress(event: dict[str, Any]) -> None:
-            nonlocal processed
+            nonlocal processed, completed, failed
             processed += 1
             label = _prompt_label(event)
             if event.get("ok"):
+                completed += 1
                 score = event.get("score")
                 try:
                     score_s = f"{float(score):.1f}"
@@ -555,9 +558,11 @@ def _run_thread(
                     score_s = "-"
                 _append_log("info", f"{processed}/{total}  {label}  score {score_s}")
             else:
+                if event.get("terminal"):
+                    failed += 1
                 err = str(event.get("error") or "failed")[:240]
                 _append_log("error", f"{processed}/{total}  {label}  failed: {err}")
-            _set(processed=processed)
+            _set(processed=processed, completed=completed, failed=failed)
 
         while True:
             if _halt.is_set():
@@ -594,16 +599,36 @@ def _run_thread(
             )
             # Gemini HTTP runs in a thread pool. Supabase writes stay on this
             # thread — the shared client is not safe for concurrent use on Windows.
+            batch_events: list[dict[str, Any]] = []
+
+            def on_batch_progress(event: dict[str, Any]) -> None:
+                batch_events.append(event)
+                on_progress(event)
+
             try:
                 evaluation_service.process_queued_batch(
                     limit=len(job_ids),
                     competition_id=competition_id,
                     concurrency=concurrency,
-                    on_progress=on_progress,
+                    on_progress=on_batch_progress,
                 )
             except Exception as exc:  # noqa: BLE001
                 _append_log("error", f"Job worker error: {exc}")
-            completed, failed = _job_counts(competition_id)
+            ok_events = [e for e in batch_events if e.get("ok")]
+            if ok_events:
+                n = len(ok_events)
+                avg_lat = sum(int(e.get("latency_ms") or 0) for e in ok_events) / n
+                avg_in = sum(int(e.get("input_tokens") or 0) for e in ok_events) / n
+                avg_think = sum(int(e.get("thinking_tokens") or 0) for e in ok_events) / n
+                cost = sum(float(e.get("estimated_cost_usd") or 0) for e in ok_events)
+                _append_log(
+                    "info",
+                    f"Batch tokens · avg {avg_lat:.0f}ms · in {avg_in:.0f} · think {avg_think:.0f} · ${cost:.4f}",
+                    latency_ms=round(avg_lat),
+                    input_tokens=round(avg_in),
+                    thinking_tokens=round(avg_think),
+                    estimated_cost_usd=round(cost, 6),
+                )
             _set(processed=processed, completed=completed, failed=failed)
             _append_log(
                 "info",

@@ -1,9 +1,45 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { EvalProgress } from '@/types'
 import { Stat } from './Stat'
 
 function usd(value: number | null | undefined): string {
   return `$${Number(value ?? 0).toFixed(4)}`
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  return `${m}:${String(sec).padStart(2, '0')}`
+}
+
+function EvalElapsedClock({
+  startedAt,
+  finishedAt,
+  running,
+}: {
+  startedAt: number | null | undefined
+  finishedAt: number | null | undefined
+  running: boolean
+}) {
+  const [now, setNow] = useState(() => Date.now() / 1000)
+
+  useEffect(() => {
+    if (!running || startedAt == null) return
+    const id = window.setInterval(() => setNow(Date.now() / 1000), 1000)
+    return () => window.clearInterval(id)
+  }, [running, startedAt])
+
+  if (startedAt == null) return null
+  const end = running ? now : (finishedAt ?? now)
+  const elapsed = Math.max(0, end - startedAt)
+  return (
+    <time dateTime={`PT${Math.floor(elapsed)}S`} className="tabular-nums">
+      {formatElapsed(elapsed)}
+    </time>
+  )
 }
 
 export function EvalProgressPanel({
@@ -35,7 +71,29 @@ export function EvalProgressPanel({
     <div className={className}>
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{title}</h2>
-        {running ? <span className="text-xs tabular-nums text-muted-foreground">live</span> : null}
+        {running ? (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            live
+            {run?.started_at != null ? (
+              <>
+                {' · '}
+                <EvalElapsedClock
+                  startedAt={run.started_at}
+                  finishedAt={run.finished_at}
+                  running
+                />
+              </>
+            ) : null}
+          </span>
+        ) : run?.started_at != null ? (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            <EvalElapsedClock
+              startedAt={run.started_at}
+              finishedAt={run.finished_at}
+              running={false}
+            />
+          </span>
+        ) : null}
       </div>
 
       <div className="mt-4 rounded-lg border border-border p-4">
@@ -51,6 +109,16 @@ export function EvalProgressPanel({
         </div>
         {running ? (
           <p className="mt-2 text-xs tabular-nums text-muted-foreground">
+            {run?.started_at != null ? (
+              <>
+                <EvalElapsedClock
+                  startedAt={run.started_at}
+                  finishedAt={run.finished_at}
+                  running
+                />
+                {' · '}
+              </>
+            ) : null}
             {run?.rate_per_second ? `${run.rate_per_second.toFixed(2)} evals/s` : '…'}
             {run?.eta_seconds ? ` · ~${Math.round(run.eta_seconds)}s remaining` : ''}
           </p>
@@ -146,6 +214,16 @@ export function EvalProgressPanel({
 
           <div className="mt-4 rounded-lg border border-border p-4 text-sm text-muted-foreground">
             Run <strong className="text-foreground">{run?.status ?? 'idle'}</strong>
+            {run?.started_at != null ? (
+              <span className="ml-3 tabular-nums">
+                elapsed{' '}
+                <EvalElapsedClock
+                  startedAt={run.started_at}
+                  finishedAt={run.finished_at}
+                  running={running}
+                />
+              </span>
+            ) : null}
             <span className="ml-3 tabular-nums">cost {usd(cost.estimated_cost_usd)}</span>
           </div>
         </>
