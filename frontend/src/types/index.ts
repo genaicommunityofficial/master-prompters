@@ -37,6 +37,13 @@ export interface AuthResponse {
   participant: ParticipantInfo
 }
 
+export interface LoginPrepareResponse {
+  requires_qr: boolean
+  token: string | null
+  participant: ParticipantInfo | null
+  display_name: string | null
+}
+
 export interface PromptInput {
   question_id: string
   prompt_text: string
@@ -69,6 +76,28 @@ export interface ManualRegistration {
   email: string | null
   status: string | null
   created_at: string | null
+}
+
+export interface ParticipantRosterRow {
+  id: string
+  registration_number: string | null
+  display_name: string | null
+  source: 'event' | 'added' | 'dataset'
+  logged_in: boolean | null
+  last_login_at: string | null
+  submitted: boolean
+  submission_status: string | null
+}
+
+export interface ParticipantRoster {
+  competition_id: string
+  test_mode: boolean
+  show_login: boolean
+  registered: number
+  logged_in: number | null
+  submitted: number
+  completed: number
+  participants: ParticipantRosterRow[]
 }
 
 export interface DashboardMetrics {
@@ -173,44 +202,125 @@ export interface EvalRunStatus {
 export interface Analytics {
   competition_id: string
   dashboard: DashboardMetrics
-  cost: {
-    total_evaluations: number
-    total_input_tokens: number
-    total_output_tokens: number
-    total_thinking_tokens: number
-    estimated_cost_usd: number
-    per_model: Record<string, CostModelRow>
-  }
+  cost: EvalCostSummary
   per_category: Record<string, CategoryStat>
 }
 
-export interface TestSuiteStatus {
-  participants: number
-  submissions: number
-  responses: number
+export interface EvalCostSummary {
+  total_evaluations: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_thinking_tokens: number
+  estimated_cost_usd: number
+  per_model: Record<string, CostModelRow>
+}
+
+export interface EvalFailedJob {
+  response_id: string | null
+  attempt_count: number | null
+  error: string
+  question_number: number | null
+}
+
+export interface EvalRunSnapshot {
+  status: string
+  accepted?: boolean
+  enqueued: number
+  processed: number
+  completed: number
+  failed: number
+  started_at: number | null
+  finished_at: number | null
+  error_message: string | null
+  elapsed_seconds: number | null
+  rate_per_second: number | null
+  eta_seconds: number | null
+}
+
+export interface EvalProgress {
+  competition_id: string
+  competition_status: string | null
+  leaderboard_visible: boolean
+  totals: {
+    participants: number
+    submissions: number
+    submitted: number
+    completed: number
+    failed: number
+    job_failed?: number
+    responses: number
+    evaluated: number
+    pending: number
+    progress_pct: number
+    avg_score: number | null
+    median_score?: number | null
+    highest_score?: number | null
+    lowest_score?: number | null
+  }
+  jobs: {
+    QUEUED: number
+    PROCESSING: number
+    RETRY: number
+    COMPLETED: number
+    FAILED: number
+    total: number
+  }
+  failed_sample: EvalFailedJob[]
+  top_errors: { message: string; count: number }[]
+  per_category: Record<string, EvalProgressCategory>
+  cost: EvalCostSummary
+  run: EvalRunSnapshot | null
+}
+
+export interface EvalProgressCategory {
+  question_number: number
+  title: string
+  stored: number
   evaluated: number
-  pending: number
+  progress_pct: number
+  avg_score: number | null
+  min_score?: number | null
+  max_score?: number | null
 }
 
-export interface LlmModeResponse {
-  mode: 'dummy' | 'gemini'
-  message?: string
+export interface FunnelStage {
+  count: number
+  pct_of_registered?: number | null
+  pct_of_logged_in?: number | null
+  pct_of_submitted?: number | null
 }
 
-export interface SeedResult {
-  success: boolean
-  participants: number
-  submissions: number
-  responses: number
+export interface ParticipationRow {
+  participant_id: string
+  display_name: string | null
+  email: string | null
+  registration_number: string | null
+  status: string | null
+  login_count: number
+  last_login_at: string | null
+  submitted: boolean
+  submission_status: string | null
+  total_score: number | null
 }
 
-export interface CleanupResult {
-  success: boolean
-  participants: number
-  submissions: number
-  responses: number
-  jobs: number
-  evaluations: number
+export interface ParticipationFunnel {
+  competition_id: string
+  registered: number
+  logged_in: number
+  logged_in_not_submitted: number
+  submitted: number
+  completed: number
+  funnel: {
+    registered: number
+    logged_in: { count: number; pct_of_registered: number | null }
+    submitted: { count: number; pct_of_logged_in: number | null }
+    completed: { count: number; pct_of_submitted: number | null }
+  }
+  sources: {
+    with_registration_number: number
+    qr_only: number
+  }
+  participants: ParticipationRow[]
 }
 
 export interface CriteriaEntry {

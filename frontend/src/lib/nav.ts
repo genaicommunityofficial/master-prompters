@@ -9,5 +9,11 @@ export function participantNavLinks(): SiteLink[] {
 }
 
 export function adminNavLinks(): SiteLink[] {
-  return [{ label: 'Control Room', to: '/admin' }]
+  return [
+    { label: 'Dashboard', to: '/admin' },
+    { label: 'Participants', to: '/admin/participants' },
+    { label: 'Evaluation', to: '/admin/eval' },
+    { label: 'Criteria', to: '/admin/criteria' },
+    { label: 'Export', to: '/admin/export' },
+  ]
 }

@@ -184,6 +184,7 @@ def _process_claimed_job(job_id: str, job: dict) -> None:
                 "output_tokens": result.get("output_tokens"),
                 "thinking_tokens": result.get("thinking_tokens"),
                 "latency_ms": result.get("latency_ms"),
+                "estimated_cost_usd": result.get("estimated_cost_usd"),
                 "evaluation_version": evaluation_version,
             }
         )
@@ -400,14 +401,13 @@ def _recompute_ranks(competition_id: str) -> None:
 
 def process_queued_batch(
     limit: int = 10,
-    llm_mode: str | None = None,
     competition_id: str | None = None,
 ) -> int:
     """Process up to *limit* QUEUED jobs, batching by question/criteria.
 
     Jobs sharing the same ``question_id`` are grouped and sent to the LLM in
     a single request, drastically reducing wall-clock time when many prompts
-    need evaluation. ``llm_mode`` ("dummy"|"gemini") selects the evaluator.
+    need evaluation. Uses the real Gemini LLM only.
     When ``competition_id`` is given only jobs whose responses belong to that
     competition are processed (prevents cross-competition contamination).
     """
@@ -455,14 +455,13 @@ def process_queued_batch(
 
     processed = 0
     for question_id, group in groups.items():
-        processed += _process_batch_group(question_id, group, llm_mode=llm_mode)
+        processed += _process_batch_group(question_id, group)
     return processed
 
 
 def _process_batch_group(
     question_id: str,
     group: list[tuple[dict, dict]],
-    llm_mode: str | None = None,
 ) -> int:
     """Evaluate a batch of prompts that share the same question_id."""
     from app.services import eval_criteria_service as crit
@@ -508,7 +507,6 @@ def _process_batch_group(
             question,
             evaluation_config,
             criteria_md=criteria_md,
-            llm_mode=llm_mode,
         )
     except Exception as exc:
         for job_row, _ in claimed:
@@ -566,6 +564,7 @@ def _save_evaluation(job_row: dict, resp: dict, result: dict) -> None:
                 "output_tokens": result.get("output_tokens"),
                 "thinking_tokens": result.get("thinking_tokens"),
                 "latency_ms": result.get("latency_ms"),
+                "estimated_cost_usd": result.get("estimated_cost_usd"),
                 "evaluation_version": evaluation_version,
             }
         )

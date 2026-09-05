@@ -56,28 +56,35 @@ def set_status(competition_id: str, status: str) -> dict | None:
     return get_competition(competition_id)
 
 
+def _iso(value: object) -> str | None:
+    if value is None:
+        return None
+    return value if isinstance(value, str) else str(value)
+
+
 def to_public_competition(comp: dict) -> dict:
     """Prune internal fields for the participant-facing API."""
     now_open = comp.get("status") == "OPEN"
     return {
         "id": comp["id"],
-        "name": comp.get("name"),
-        "slug": comp.get("slug"),
+        "name": comp.get("name") or "Competition",
+        "slug": comp.get("slug") or comp["id"],
         "description": comp.get("description"),
         "status": comp.get("status"),
-        "start_at": comp.get("start_at"),
-        "end_at": comp.get("end_at"),
+        "start_at": _iso(comp.get("start_at")),
+        "end_at": _iso(comp.get("end_at")),
         "leaderboard_visible": bool(comp.get("leaderboard_visible")),
         "competition_status_open": now_open,
     }
 
 
 def to_public_question(q: dict) -> dict:
+    number = q.get("question_number") or 0
     return {
         "id": q["id"],
-        "question_number": q.get("question_number"),
-        "title": q.get("title"),
+        "question_number": int(number),
+        "title": q.get("title") or f"Question {number}",
         "description": q.get("description"),
-        "max_length": q.get("max_length"),
-        "min_length": q.get("min_length"),
+        "max_length": int(q.get("max_length") or 2000),
+        "min_length": int(q.get("min_length") or 20),
     }

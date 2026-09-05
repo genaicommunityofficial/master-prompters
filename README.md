@@ -1,9 +1,10 @@
 # Prompt Writing Competition Platform
 
 Minimal, durable, asynchronous platform for a prompt-writing competition (Master
-Prompters 2.0). Participants sign in with their registration QR code, write five
-prompts, and submit once. The backend stores submissions and enqueues async
-evaluation jobs; it never waits on the LLM in the request path.
+Prompters 2.0). Participants sign in with their registration number, then confirm
+with the event QR code, write five prompts, and submit once. The backend stores
+submissions and enqueues async evaluation jobs; it never waits on the LLM in the
+request path.
 
 ## Stack
 
@@ -48,12 +49,12 @@ npm install
 npm run dev
 ```
 
-## Authentication (QR login)
+## Authentication
 
-Participants already have a QR code from the existing registration site. The QR
-message (e.g. `GENAI_QR_...`) is decoded from an uploaded image with OpenCV, or
-pasted as text, then matched against the existing `registrations.qr_token` to
-map identity — no new credentials required.
+Participants enter their event registration number, then scan or paste the QR
+code (`GENAI_QR_...`). The QR is matched against the existing `registrations`
+table (read-only). A pipeline tester account can sign in with registration
+number only and is excluded from leaderboards.
 
 ## Security
 
@@ -61,20 +62,24 @@ map identity — no new credentials required.
 - RLS on all new tables; the frontend never sees the service-role key.
 - Participant can only read/write their own submission (enforced in backend).
 - Admin is a separate username/password login (bcrypt-verified, rate-limited) that
-  mints a `role=admin` JWT; admin ops (dashboard, live monitor, cost analytics,
-  prompt export, test suite) are exposed via `frontend/src/pages/admin.tsx`.
+  mints a `role=admin` JWT; admin ops live under `/admin` with a Live / Test mode switch.
 
 ## Testing
 
 ```bash
-cd backend && .venv/Scripts/python.exe -m pytest -q   # 31 tests
+cd backend && .venv/Scripts/python.exe -m pytest -q
 cd frontend && npm run lint && npm run typecheck
 
-# optional end-to-end test suite (isolated TEST competition):
-#   seeds realistic ~500-word prompts, runs the evaluation pipeline with the
-#   dummy evaluator, and cleans up. See --help for modes.
-cd backend && .venv/Scripts/python.exe ../scripts/e2e_production_test.py --mode all
-
-# In the admin UI, the Test Suite tab can seed data (1-1000 participants) and
-# toggle the evaluator between dummy (fast, no API cost) and real Gemini.
+# optional end-to-end checks against a running server (does not wipe the
+# authored 1500-prompt TEST dataset unless you pass --wipe-test-data):
+cd backend && .venv/Scripts/python.exe ../scripts/e2e_production_test.py --mode admin
 ```
+
+Populate the isolated TEST competition from CLI only:
+
+```bash
+python scripts/populate_test_dataset.py --total 300
+```
+
+Admin → Test mode runs the same Gemini evaluation path as live. There is no
+dummy evaluator and no seed/cleanup UI.

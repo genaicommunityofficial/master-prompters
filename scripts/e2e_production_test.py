@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """End-to-end production test for the Prompt Competition Platform.
 
-Boots an isolated server (or uses --base-url), then exercises every real flow
+Boots an isolated server (or uses --base-url), then exercises real flows
 against Supabase and asserts on the results. Exits 0 on full PASS, 1 on any
-failure. Designed to be run unattended: every network step has a hard timeout,
-and the TEST competition's data is deleted at the end so production stays clean.
+failure. Designed to be run unattended: every network step has a hard timeout.
+
+Does **not** wipe the authored TEST dataset unless you pass --wipe-test-data.
 
 Modes:
   --mode smoke    QR-login mapping + one synthetic TEST participant submission
-  --mode admin    full admin assertions (dashboard, monitor, analytics, export, queue)
-  --mode seed     N synthetic participants seeded into the TEST competition
-  --mode eval     seed + run the evaluation pipeline on the TEST competition
-  --mode all      smoke then admin then eval then seed (default)
+  --mode admin    dashboard, monitor, analytics, export, eval-status, participation
+  --mode seed     N synthetic participants seeded into the TEST competition (CLI only)
+  --mode eval     assert TEST eval-status and that start-eval uses the Gemini path
+  --mode all      smoke then admin then eval (default; no seed, no wipe)
 
 Usage (local, boots its own server on a random port):
-  python scripts/e2e_production_test.py --mode all --total 300
+  python scripts/e2e_production_test.py --mode admin
 
 Usage (production / already-running server):
   python scripts/e2e_production_test.py --base-url https://<app>/api --mode smoke
-
-Env: reads backend/.env for ADMIN_USERNAME/ADMIN_PASSWORD_HASH, SUPABASE creds,
-JWT_SECRET. Requires backend deps (fastapi, supabase, httpx, jwt) installed.
 """
 
 from __future__ import annotations
@@ -190,7 +188,11 @@ def smoke_flow(base: str) -> None:
     try:
         r = httpx.post(
             base + "/api/auth/login/message",
-            json={"competition_id": REAL_COMPETITION, "qr_message": REAL_QR_TOKEN},
+            json={
+                "competition_id": REAL_COMPETITION,
+                "qr_message": REAL_QR_TOKEN,
+                "registration_number": "SMOKE",
+            },
             timeout=30,
         )
         ok_endpoint = r.status_code in (200, 401)
@@ -294,11 +296,46 @@ def admin_flow(base: str) -> None:
     crit = get("/api/admin/criteria")
     check("admin criteria list", crit is not None and crit.status_code == 200, "timeout" if crit is None else str(crit.status_code))
 
-    st = get("/api/admin/test/status")
-    check("admin test status", st is not None and st.status_code == 200 and "responses" in st.json(), "timeout" if st is None else str(st.status_code))
+    live_eval = get("/api/admin/eval-status")
+    check(
+        "admin eval-status live",
+        live_eval is not None and live_eval.status_code == 200 and "totals" in live_eval.json(),
+        "timeout" if live_eval is None else str(live_eval.status_code),
+    )
 
-    lm = get("/api/admin/test/llm-mode")
-    check("admin llm-mode status", lm is not None and lm.status_code == 200 and "mode" in lm.json(), "timeout" if lm is None else str(lm.status_code))
+    test_eval = get("/api/admin/eval-status?competition_id=competition_test")
+    body = test_eval.json() if test_eval is not None and test_eval.status_code == 200 else {}
+    check(
+        "admin eval-status test",
+        test_eval is not None and test_eval.status_code == 200 and body.get("competition_id") == "competition_test",
+        "timeout" if test_eval is None else str(test_eval.status_code),
+    )
+    check(
+        "test dataset has authored responses",
+        int((body.get("totals") or {}).get("responses") or 0) >= 1500,
+        str((body.get("totals") or {}).get("responses")),
+    )
+
+    part = get("/api/admin/participation")
+    check(
+        "admin participation",
+        part is not None and part.status_code == 200 and "registered" in part.json(),
+        "timeout" if part is None else str(part.status_code),
+    )
+
+    tlb = get("/api/admin/leaderboard?competition_id=competition_test")
+    check(
+        "admin test leaderboard",
+        tlb is not None and tlb.status_code == 200 and "entries" in tlb.json(),
+        "timeout" if tlb is None else str(tlb.status_code),
+    )
+
+    forbidden = get("/api/admin/eval-status?competition_id=competition_other")
+    check(
+        "admin rejects unknown competition",
+        forbidden is not None and forbidden.status_code == 403,
+        "timeout" if forbidden is None else str(forbidden.status_code),
+    )
 
 
 def load_flow(base: str, total: int) -> None:
@@ -313,47 +350,33 @@ def load_flow(base: str, total: int) -> None:
 
 
 def eval_flow(base: str) -> None:
-    """Seed a few TEST submissions, run the evaluation pipeline, and assert
-    every response is evaluated and the submissions are finalized."""
+    """Assert TEST eval-status and that start-eval uses the real Gemini path."""
     print("\n=== EVAL PATH ===")
-    db = get_db()
     token = admin_login(base)
     check("admin login for eval", bool(token))
     if not token:
         return
-
-    # Seed 2 participants (10 responses) into the isolated TEST competition.
-    seeded = test_seeding_service.seed_test_data(participant_count=2)
-    check("eval seed created 10 responses", seeded["responses"] == 10, f"{seeded['responses']} responses")
-
-    # Run the evaluation pipeline in-process using the same queued-batch code
-    # path the admin "Start Eval" triggers, with a small limit and the dummy
-    # evaluator so it runs fast and deterministically without Gemini.
-    import importlib
-
-    evs = importlib.import_module("app.services.evaluation_service")
-    processed = 0
-    for _ in range(20):  # loop until the queue drains (bounded safety)
-        n = evs.process_queued_batch(limit=5, llm_mode="dummy")
-        processed += n
-        if n == 0:
-            break
-    check("eval pipeline processed queued responses", processed >= 5, f"{processed} processed")
-
-    resp_rows = (
-        db.table("pc_responses")
-        .select("id")
-        .eq("submission_id", (db.table("pc_submissions").select("id").eq("competition_id", test_seeding_service.TEST_COMPETITION_ID).execute().data or [{}])[0].get("id"))
-        .execute()
-        .data
-        or []
-    )
-    ev = db.table("pc_evaluations").select("id").in_("response_id", [r["id"] for r in resp_rows]).execute().data or []
+    h = {"Authorization": f"Bearer {token}"}
+    try:
+        status = httpx.get(
+            base + "/api/admin/eval-status?competition_id=competition_test",
+            headers=h,
+            timeout=90,
+        )
+    except httpx.HTTPError as exc:
+        check("eval-status test", False, str(exc))
+        return
+    check("eval-status test", status.status_code == 200, str(status.status_code))
+    totals = (status.json() or {}).get("totals") or {}
     check(
-        "eval pipeline wrote evaluation rows",
-        len(ev) >= 1,
-        f"{len(ev)} evaluations",
+        "test competition has authored prompts",
+        int(totals.get("responses") or 0) >= 1500,
+        str(totals.get("responses")),
     )
+    check("eval-status includes cost", "cost" in (status.json() or {}), str(list((status.json() or {}).keys())))
+    check("eval-status includes jobs", "jobs" in (status.json() or {}))
+    # Do not POST /evaluations/start here — that would enqueue the full 1500-prompt
+    # Gemini run. The admin UI Test pipeline is the operator trigger.
 
 
 def cleanup_flow() -> None:
@@ -378,7 +401,11 @@ def main() -> int:
     parser.add_argument("--mode", choices=["smoke", "admin", "eval", "seed", "all"], default="all")
     parser.add_argument("--total", type=int, default=int(os.getenv("SEED_TOTAL", "20")))
     parser.add_argument("--port", type=int, default=0)
-    parser.add_argument("--keep-test-data", action="store_true")
+    parser.add_argument(
+        "--wipe-test-data",
+        action="store_true",
+        help="Delete competition_test rows after the run. Off by default.",
+    )
     args = parser.parse_args()
 
     server: ServerHandle | None = None
@@ -403,9 +430,9 @@ def main() -> int:
             admin_flow(base)
         if args.mode in ("all", "eval"):
             eval_flow(base)
-        if args.mode in ("seed", "all"):
+        if args.mode == "seed":
             load_flow(base, args.total)
-        if not args.keep_test_data:
+        if args.wipe_test_data:
             cleanup_flow()
     except Exception as exc:  # noqa: BLE001
         check("harness unhandled error", False, str(exc))

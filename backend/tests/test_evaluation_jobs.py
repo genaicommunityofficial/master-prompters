@@ -1,5 +1,6 @@
-from app.services.submission_service import LogOnlyEvaluator, job_payloads_for_responses
+from app.services.submission_service import ensure_gemini_configured, job_payloads_for_responses
 from app.services.eval_run_service import clamp_eval_params, reset_for_tests, start as start_eval
+import pytest
 
 
 def test_job_payloads_use_response_id_not_question_id():
@@ -12,13 +13,21 @@ def test_job_payloads_use_response_id_not_question_id():
     assert all(j["status"] == "QUEUED" for j in jobs)
 
 
-def test_dummy_evaluator_is_deterministic_and_fast():
-    ev = LogOnlyEvaluator()
-    a = ev.evaluate_sync("same prompt text here", {"id": "q1"}, {})
-    b = ev.evaluate_sync("same prompt text here", {"id": "q1"}, {})
-    assert a["score"] == b["score"]
-    assert a["model"] == "dummy-llm-v1"
-    assert a["latency_ms"] >= 0
+def test_missing_api_key_raises_config_error(monkeypatch):
+    class EmptySettings:
+        gemini_api_key = ""
+
+    monkeypatch.setattr("app.config.settings", EmptySettings())
+    with pytest.raises(Exception) as exc:
+        ensure_gemini_configured()
+    assert "Gemini API key" in str(exc.value)
+
+
+def test_eval_start_refuses_missing_key(monkeypatch):
+    monkeypatch.setattr("app.config.settings", type("S", (), {"gemini_api_key": ""})())
+    with pytest.raises(Exception) as exc:
+        start_eval(competition_id="competition_test", batch_size=4, concurrency=2)
+    assert "Gemini API key" in str(exc.value)
 
 
 def test_eval_params_are_capped():
@@ -30,6 +39,7 @@ def test_eval_params_are_capped():
 
 def test_eval_start_refuses_when_running(monkeypatch):
     reset_for_tests()
+    monkeypatch.setattr("app.config.settings", type("S", (), {"gemini_api_key": "test-key"})())
     monkeypatch.setattr("app.services.eval_run_service._spawn", lambda **kwargs: None)
     first = start_eval(competition_id="competition_test", batch_size=4, concurrency=2)
     assert first["status"] == "running"

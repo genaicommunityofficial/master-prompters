@@ -9,9 +9,10 @@ from pydantic import BaseModel, Field, field_validator
 # Auth
 # ---------------------------------------------------------------------------
 class QrLoginRequest(BaseModel):
-    """Send either a QR image (multipart) or the raw QR message text."""
+    """QR step of participant login. Registration number must already be collected."""
 
     competition_id: str
+    registration_number: str = Field(min_length=1, max_length=128)
     qr_message: str | None = Field(default=None, max_length=512, description="Raw QR token text, e.g. GENAI_QR_...")
 
     @field_validator("qr_message")
@@ -22,10 +23,27 @@ class QrLoginRequest(BaseModel):
             return v or None
         return v
 
+    @field_validator("registration_number")
+    @classmethod
+    def strip_reg(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Registration number is required")
+        return v
+
 
 class AuthResponse(BaseModel):
     token: str
     participant: ParticipantInfo
+
+
+class LoginPrepareResponse(BaseModel):
+    """Step 1 of participant login: registration number lookup."""
+
+    requires_qr: bool
+    token: str | None = None
+    participant: ParticipantInfo | None = None
+    display_name: str | None = None
 
 
 class ParticipantInfo(BaseModel):

@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { FullScreenLoader } from '@/components/ui/spinner'
-import { api } from '@/services/api'
+import { api, ApiError } from '@/services/api'
 import { useSession } from '@/store/session'
 import type { Question } from '@/types'
 import { cn, wordCount } from '@/lib/utils'
@@ -43,19 +43,34 @@ export default function CompetitionPage() {
       }
     })()
     setDraft(saved)
+    let redirected = false
     api
       .submissionExists()
       .then((ex) => {
         if (ex.submitted) {
+          redirected = true
           nav('/submitted', { replace: true })
+        }
+      })
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 401) {
+          redirected = true
+          nav('/', { replace: true, state: { loginRequired: true } })
           return
         }
+        setError(e instanceof Error ? e.message : 'Could not check submission status.')
+      })
+      .then(() => {
+        if (redirected) return
         return api.getCompetition(competitionId)
       })
       .then((c) => {
         if (c && 'questions' in c) setQuestions(c.questions)
       })
-      .catch(() => setError('Could not load the competition questions.'))
+      .catch((e) => {
+        if (redirected) return
+        setError(e instanceof Error ? e.message : 'Could not load the competition questions.')
+      })
       .finally(() => setLoading(false))
   }, [token, competitionId, nav])
 

@@ -15,11 +15,13 @@ def set_leaderboard_visible(competition_id: str, visible: bool) -> bool:
     return bool(result.data)
 
 
-def get_leaderboard(competition_id: str) -> dict:
+def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dict:
     """Return the public leaderboard, or a hidden state if not published.
 
     Only COMPLETED submissions with a total_score are eligible. Only public
     fields (rank, display name, score) are returned. Emails/notes never leave.
+    ``ignore_visibility`` lets admins preview a leaderboard before it is
+    published (used by /api/admin/leaderboard).
     """
     comp = (
         db()
@@ -34,7 +36,7 @@ def get_leaderboard(competition_id: str) -> dict:
         return {"visible": False, "entries": []}
 
     visible = bool(comp_rows[0].get("leaderboard_visible"))
-    if not visible:
+    if not visible and not ignore_visibility:
         return {"visible": False, "entries": []}
 
     # Ranked submissions, joined with participant display names.
@@ -53,27 +55,46 @@ def get_leaderboard(competition_id: str) -> dict:
     # Prefetch display names in bulk so we don't query per entry.
     participant_ids = list({s["participant_id"] for s in subs_data})
     names_by_id: dict[str, str] = {}
+    tester_ids: set[str] = set()
     for i in range(0, len(participant_ids), 100):
         chunk = participant_ids[i : i + 100]
-        p_rows = (
-            db()
-            .table("pc_participants")
-            .select("id, display_name")
-            .in_("id", chunk)
-            .execute()
-            .data
-            or []
-        )
+        try:
+            p_rows = (
+                db()
+                .table("pc_participants")
+                .select("id, display_name, is_pipeline_tester, registration_number")
+                .in_("id", chunk)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:  # noqa: BLE001
+            p_rows = (
+                db()
+                .table("pc_participants")
+                .select("id, display_name, registration_number")
+                .in_("id", chunk)
+                .execute()
+                .data
+                or []
+            )
         for p in p_rows:
             names_by_id[p["id"]] = p.get("display_name") or "Participant"
+            if p.get("is_pipeline_tester"):
+                tester_ids.add(p["id"])
+            reg = (p.get("registration_number") or "").strip().casefold()
+            if reg == "abhinavkumarsaksena":
+                tester_ids.add(p["id"])
+
+    eligible = [s for s in subs_data if s["participant_id"] not in tester_ids]
 
     # Prefetch per-submission category scores so we don't hammer the DB per row.
-    category_score_map = _category_scores_by_submission(subs_data)
+    category_score_map = _category_scores_by_submission(eligible)
 
     entries = []
     rank = 0
     prev_score = None
-    for i, sub in enumerate(subs_data, start=1):
+    for i, sub in enumerate(eligible, start=1):
         score = float(sub["total_score"])
         if score != prev_score:
             rank = i

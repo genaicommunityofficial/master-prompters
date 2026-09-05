@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from app.schemas.schemas import AuthResponse, QrLoginRequest, ParticipantInfo
+from app.schemas.schemas import AuthResponse, LoginPrepareResponse, QrLoginRequest, ParticipantInfo
 from app.security.auth import get_current_participant
 from app.services import auth_service
 from app.services.auth_service import AuthError
@@ -14,8 +14,15 @@ from app.services.qr_service import QrDecodeError, decode_qr_image
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _login(competition_id: str, qr_message: str) -> AuthResponse:
-    result = auth_service.login_with_qr_message(qr_message=qr_message, competition_id=competition_id)
+def _login(competition_id: str, qr_message: str, registration_number: str) -> AuthResponse:
+    try:
+        result = auth_service.login_with_qr_message(
+            qr_message=qr_message,
+            competition_id=competition_id,
+            registration_number=registration_number,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     return AuthResponse(
         token=result["token"],
         participant=ParticipantInfo(**result["participant"]),
@@ -25,6 +32,7 @@ def _login(competition_id: str, qr_message: str) -> AuthResponse:
 @router.post("/login/qr", response_model=AuthResponse)
 async def login_with_qr_image(
     competition_id: str,
+    registration_number: Annotated[str, Query(min_length=1, max_length=128)],
     image: Annotated[UploadFile, File(description="QR code image file")],
 ) -> AuthResponse:
     data = await image.read()
@@ -34,19 +42,16 @@ async def login_with_qr_image(
         qr_message = decode_qr_image(data)
     except QrDecodeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _login(competition_id, qr_message)
+    return _login(competition_id, qr_message, registration_number)
 
 
 @router.post("/login/message", response_model=AuthResponse)
 async def login_with_qr_message(body: QrLoginRequest) -> AuthResponse:
     if not body.qr_message:
         raise HTTPException(status_code=400, detail="QR message is required.")
-    return _login(body.competition_id, body.qr_message)
-
-
-class TestLoginRequest(BaseModel):
-    identifier: str  # email, reg number, or display name
-    competition_id: str
+    if not body.registration_number:
+        raise HTTPException(status_code=400, detail="Registration number is required.")
+    return _login(body.competition_id, body.qr_message, body.registration_number)
 
 
 class RegistrationNumberLoginRequest(BaseModel):
@@ -54,9 +59,9 @@ class RegistrationNumberLoginRequest(BaseModel):
     competition_id: str
 
 
-@router.post("/login/registration-number", response_model=AuthResponse)
-async def registration_number_login(body: RegistrationNumberLoginRequest) -> AuthResponse:
-    """Production login using an official registration number."""
+@router.post("/login/registration-number", response_model=LoginPrepareResponse)
+async def registration_number_login(body: RegistrationNumberLoginRequest) -> LoginPrepareResponse:
+    """Look up a registration number. Testers / admin extras sign in immediately."""
     if not body.registration_number.strip():
         raise HTTPException(status_code=400, detail="Registration number is required.")
     try:
@@ -66,25 +71,12 @@ async def registration_number_login(body: RegistrationNumberLoginRequest) -> Aut
         )
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    return AuthResponse(
-        token=result["token"],
-        participant=ParticipantInfo(**result["participant"]),
-    )
-
-
-@router.post("/login/test", response_model=AuthResponse)
-async def test_login(body: TestLoginRequest) -> AuthResponse:
-    """Development-only fallback login: accepts email, registration number, or display name."""
-    try:
-        result = auth_service.login_with_test(
-            identifier=body.identifier,
-            competition_id=body.competition_id,
-        )
-    except AuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    return AuthResponse(
-        token=result["token"],
-        participant=ParticipantInfo(**result["participant"]),
+    participant = result.get("participant")
+    return LoginPrepareResponse(
+        requires_qr=bool(result.get("requires_qr")),
+        token=result.get("token"),
+        participant=ParticipantInfo(**participant) if participant else None,
+        display_name=result.get("display_name"),
     )
 
 

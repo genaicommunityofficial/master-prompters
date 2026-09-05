@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { QrCode, ScanLine, KeyRound, UserRound, BadgeCheck } from 'lucide-react'
+import { QrCode, ScanLine, KeyRound, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -9,30 +9,24 @@ import { Spinner } from '@/components/ui/spinner'
 import { api, setToken } from '@/services/api'
 import { useSession } from '@/store/session'
 import { cn } from '@/lib/utils'
+import type { AuthResponse } from '@/types'
 
-type Mode = 'scan' | 'text' | 'reg' | 'quick'
+type Step = 'reg' | 'qr'
+type QrMode = 'scan' | 'text'
 
 export default function QrLogin({ competitionId }: { competitionId: string }) {
   const nav = useNavigate()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [mode, setMode] = useState<Mode>('scan')
+  const [step, setStep] = useState<Step>('reg')
+  const [qrMode, setQrMode] = useState<QrMode>('scan')
   const [fileName, setFileName] = useState('')
   const [qrMessage, setQrMessage] = useState('')
   const [regNumber, setRegNumber] = useState('')
-  const [quickId, setQuickId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const setSession = useSession((s) => s.setSession)
 
-  const isDev = (import.meta.env.VITE_ENABLE_TEST_LOGIN ?? 'true') !== 'false'
-
-  const applyAuth = (res: { token: string; participant: {
-    display_name: string
-    email: string | null
-    vit_registration_number: string | null
-    competition_id: string
-    already_submitted: boolean
-  } }) => {
+  const applyAuth = (res: AuthResponse) => {
     setToken(res.token)
     setSession({
       token: res.token,
@@ -45,6 +39,33 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
     nav(res.participant.already_submitted ? '/submitted' : '/competition')
   }
 
+  const handleReg = async () => {
+    if (!regNumber.trim()) {
+      setError('Please enter your registration number.')
+      return
+    }
+    if (!competitionId) {
+      setError('Competition not available. Please wait or refresh the page.')
+      return
+    }
+    setError('')
+    setLoading(true)
+    try {
+      const res = await api.loginWithRegistrationNumber(competitionId, regNumber.trim())
+      if (!res.requires_qr && res.token && res.participant) {
+        applyAuth({ token: res.token, participant: res.participant })
+        return
+      }
+      setStep('qr')
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'Unable to look up that registration number.',
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleFile = async (file: File | undefined) => {
     if (!file) return
     if (!competitionId) {
@@ -55,7 +76,7 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
     setError('')
     setLoading(true)
     try {
-      const res = await api.loginWithQrImage(competitionId, file)
+      const res = await api.loginWithQrImage(competitionId, regNumber.trim(), file)
       applyAuth(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to verify that QR code.')
@@ -76,60 +97,10 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
     setError('')
     setLoading(true)
     try {
-      const res = await api.loginWithQrMessage(competitionId, qrMessage.trim())
+      const res = await api.loginWithQrMessage(competitionId, regNumber.trim(), qrMessage.trim())
       applyAuth(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to verify that QR message.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleReg = async () => {
-    if (!regNumber.trim()) {
-      setError('Please enter your registration number.')
-      return
-    }
-    if (!competitionId) {
-      setError('Competition not available. Please wait or refresh the page.')
-      return
-    }
-    setError('')
-    setLoading(true)
-    try {
-      const res = await api.loginWithRegistrationNumber(competitionId, regNumber.trim())
-      applyAuth(res)
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Unable to log in with that registration number.',
-      )
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleQuick = async () => {
-    if (!quickId.trim()) {
-      setError('Please enter your email, registration number, or display name.')
-      return
-    }
-    if (!competitionId) {
-      setError('Competition not available. Please wait or refresh the page.')
-      return
-    }
-    setError('')
-    setLoading(true)
-    try {
-      const res = await api.loginWithTest(competitionId, quickId.trim())
-      applyAuth(res)
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Unable to log in with that identifier. Make sure you are in development mode.',
-      )
     } finally {
       setLoading(false)
     }
@@ -142,107 +113,13 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
           <QrCode className="h-5 w-5" /> Participant sign in
         </CardTitle>
         <CardDescription>
-          Use the QR code from your registration to sign in and submit your prompts.
+          {step === 'reg'
+            ? 'Enter the registration number from your event registration.'
+            : `Confirm with the QR code for ${regNumber.trim()}.`}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className={cn('flex flex-wrap rounded-lg border border-border bg-muted p-1')}>
-          <button
-            type="button"
-            onClick={() => setMode('scan')}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              mode === 'scan' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
-            )}
-          >
-            <ScanLine className="h-4 w-4" /> Scan QR
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('text')}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              mode === 'text' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
-            )}
-          >
-            <KeyRound className="h-4 w-4" /> Paste message
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('reg')}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              mode === 'reg' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
-            )}
-          >
-            <BadgeCheck className="h-4 w-4" /> Registration no.
-          </button>
-          {isDev ? (
-            <button
-              type="button"
-              onClick={() => setMode('quick')}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                mode === 'quick' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
-              )}
-            >
-              <UserRound className="h-4 w-4" /> Quick login
-            </button>
-          ) : null}
-        </div>
-
-        {mode === 'scan' ? (
-          <div className="space-y-4">
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={loading}
-              className="flex w-full flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/40 px-4 py-10 text-center transition-colors hover:border-foreground/30 disabled:opacity-50"
-            >
-              {loading ? (
-                <Spinner className="h-6 w-6" />
-              ) : (
-                <ScanLine className="h-8 w-8 text-muted-foreground" />
-              )}
-              {fileName ? (
-                <span className="text-sm font-medium">{fileName}</span>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  Tap to upload your QR code image
-                </span>
-              )}
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => handleFile(e.target.files?.[0])}
-            />
-          </div>
-        ) : mode === 'text' ? (
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="qr-message">QR message</Label>
-              <Input
-                id="qr-message"
-                placeholder="Paste the message from your QR code"
-                value={qrMessage}
-                onChange={(e) => setQrMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleText()}
-                disabled={loading}
-              />
-            </div>
-            <Button
-              className="w-full"
-              size="lg"
-              onClick={handleText}
-              disabled={loading || !qrMessage.trim()}
-            >
-              {loading ? <Spinner className="h-4 w-4" /> : 'Continue'}
-            </Button>
-          </div>
-        ) : mode === 'reg' ? (
+        {step === 'reg' ? (
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="reg-number">Registration number</Label>
@@ -252,47 +129,99 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
                 placeholder="e.g. 23BCE0001"
                 value={regNumber}
                 onChange={(e) => setRegNumber(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleReg()}
+                onKeyDown={(e) => e.key === 'Enter' && void handleReg()}
                 disabled={loading}
               />
-              <p className="text-xs text-muted-foreground">
-                Enter the registration number you used when you signed up for this event.
-              </p>
             </div>
-            <Button
-              className="w-full"
-              size="lg"
-              onClick={handleReg}
-              disabled={loading || !regNumber.trim()}
-            >
-              {loading ? <Spinner className="h-4 w-4" /> : 'Sign in'}
+            <Button className="w-full" size="lg" onClick={() => void handleReg()} disabled={loading || !regNumber.trim()}>
+              {loading ? <Spinner className="h-4 w-4" /> : 'Continue'}
             </Button>
           </div>
         ) : (
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="quick-id">Email, reg number, or name</Label>
-              <Input
-                id="quick-id"
-                placeholder="e.g. test@example.com or TEST001"
-                value={quickId}
-                onChange={(e) => setQuickId(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleQuick()}
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground">
-                Dev-only fallback when your QR isn't available. Use the test participant to try
-                the system end-to-end.
-              </p>
-            </div>
-            <Button
-              className="w-full"
-              size="lg"
-              onClick={handleQuick}
-              disabled={loading || !quickId.trim()}
+          <div className="space-y-4">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                setStep('reg')
+                setError('')
+              }}
             >
-              {loading ? <Spinner className="h-4 w-4" /> : 'Sign in'}
-            </Button>
+              <ArrowLeft className="h-3.5 w-3.5" /> Change registration number
+            </button>
+            <div className={cn('flex rounded-lg border border-border bg-muted p-1')}>
+              <button
+                type="button"
+                onClick={() => setQrMode('scan')}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
+                  qrMode === 'scan' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+                )}
+              >
+                <ScanLine className="h-4 w-4" /> Scan QR
+              </button>
+              <button
+                type="button"
+                onClick={() => setQrMode('text')}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium',
+                  qrMode === 'text' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+                )}
+              >
+                <KeyRound className="h-4 w-4" /> Paste message
+              </button>
+            </div>
+
+            {qrMode === 'scan' ? (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={loading}
+                  className="flex w-full flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/40 px-4 py-10 text-center hover:border-foreground/30 disabled:opacity-50"
+                >
+                  {loading ? (
+                    <Spinner className="h-6 w-6" />
+                  ) : (
+                    <ScanLine className="h-8 w-8 text-muted-foreground" />
+                  )}
+                  {fileName ? (
+                    <span className="text-sm font-medium">{fileName}</span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Tap to upload your QR code image</span>
+                  )}
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => void handleFile(e.target.files?.[0])}
+                />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="qr-message">QR message</Label>
+                  <Input
+                    id="qr-message"
+                    placeholder="Paste the message from your QR code"
+                    value={qrMessage}
+                    onChange={(e) => setQrMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void handleText()}
+                    disabled={loading}
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={() => void handleText()}
+                  disabled={loading || !qrMessage.trim()}
+                >
+                  {loading ? <Spinner className="h-4 w-4" /> : 'Sign in'}
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

@@ -17,113 +17,39 @@ CATEGORY_TITLES = {
 
 
 def get_evaluation_cost_summary(competition_id: str) -> dict[str, Any]:
-    """Educational context only: returns raw aggregates; final pricing lookup
-    (pc_evaluation_cost_lookup) is applied at export/report time. Scoped to the
-    given competition via responses -> submissions."""
-    evals = (
-        db()
-        .table("pc_evaluations")
-        .select(
-            "model, input_tokens, output_tokens, thinking_tokens, estimated_cost_usd, evaluation_version, "
-            "pc_responses(pc_submissions(competition_id))"
-        )
-        .eq("pc_responses.pc_submissions.competition_id", competition_id)
-        .execute()
-        .data
-        or []
-    )
+    """Return token/USD cost aggregates, scoped to the given competition.
 
-    counts = {
-        "total_evaluations": len(evals),
-        "total_input_tokens": 0,
-        "total_output_tokens": 0,
-        "total_thinking_tokens": 0,
-        "estimated_cost_usd": 0.0,
-        "per_model": {},
-    }
-    per = counts["per_model"]
-    for e in evals:
-        model = e.get("model") or "unknown"
-        m = per.setdefault(
-            model,
-            {"evaluations": 0, "input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0, "cost_usd": 0.0},
-        )
-        inp = e.get("input_tokens") or 0
-        out = e.get("output_tokens") or 0
-        think = e.get("thinking_tokens") or 0
-        cost = e.get("estimated_cost_usd") or 0
-        m["evaluations"] += 1
-        m["input_tokens"] += inp
-        m["output_tokens"] += out
-        m["thinking_tokens"] += think
-        m["cost_usd"] += cost
-        counts["total_input_tokens"] += inp
-        counts["total_output_tokens"] += out
-        counts["total_thinking_tokens"] += think
-        counts["estimated_cost_usd"] += cost
+    Cost is derived per evaluation from the model's lookup price when the
+    stored ``estimated_cost_usd`` is null, so totals are accurate for old rows
+    and grow live with evaluation progress.
+    """
+    from app.services.eval_cost import summarize_cost
+    from app.services.eval_status_service import competition_eval_rows
 
-    counts["estimated_cost_usd"] = round(counts["estimated_cost_usd"], 6)
-    for _, m in per.items():
-        m["cost_usd"] = round(m["cost_usd"], 6)
-    return counts
+    evals = competition_eval_rows(competition_id)
+    return summarize_cost(evals)
 
 
 def get_analytics(competition_id: str) -> dict[str, Any]:
-    from app.services import admin_service
+    from app.services.admin_service import dashboard_from_progress
+    from app.services.eval_status_service import get_eval_progress
 
-    dashboard = admin_service.get_dashboard(competition_id)
-    cost = get_evaluation_cost_summary(competition_id)
-
-    # Per-category averages: join responses->evaluations by question title.
+    progress = get_eval_progress(competition_id)
     per_category: dict[str, dict[str, Any]] = {}
-    responses = (
-        db()
-        .table("pc_responses")
-        .select(
-            "question_id, prompt_text, "
-            "pc_evaluations(score), pc_submissions(competition_id)"
-        )
-        .eq("pc_submissions.competition_id", competition_id)
-        .execute()
-        .data
-        or []
-    )
-    # Aggregate scores by question_id.
-    by_q: dict[str, list[float]] = {}
-    for r in responses:
-        evs = r.get("pc_evaluations") or []
-        for ev in evs or []:
-            if ev.get("score") is not None:
-                qid = r.get("question_id")
-                by_q.setdefault(qid, []).append(float(ev["score"]))
-
-    questions = (
-        db()
-        .table("pc_questions")
-        .select("id, question_number, title")
-        .eq("competition_id", competition_id)
-        .order("question_number")
-        .execute()
-        .data
-        or []
-    )
-    for q in questions:
-        qid = q["id"]
-        scores = by_q.get(qid, [])
+    for qid, cat in (progress.get("per_category") or {}).items():
         per_category[qid] = {
-            "question_number": q.get("question_number"),
-            "title": q.get("title"),
-            "stored": sum(1 for r in responses if r.get("question_id") == qid),
-            "evaluated": len(scores),
-            "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
-            "min_score": round(min(scores), 2) if scores else None,
-            "max_score": round(max(scores), 2) if scores else None,
+            "question_number": cat.get("question_number"),
+            "title": cat.get("title"),
+            "stored": cat.get("stored", 0),
+            "evaluated": cat.get("evaluated", 0),
+            "avg_score": cat.get("avg_score"),
+            "min_score": cat.get("min_score"),
+            "max_score": cat.get("max_score"),
         }
-
     return {
         "competition_id": competition_id,
-        "dashboard": dashboard,
-        "cost": cost,
+        "dashboard": dashboard_from_progress(progress),
+        "cost": progress["cost"],
         "per_category": per_category,
     }
 

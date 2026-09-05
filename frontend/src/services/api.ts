@@ -2,23 +2,21 @@ import type {
   AdminLoginResponse,
   Analytics,
   AuthResponse,
-  CleanupResult,
   Competition,
   CompetitionDetail,
   CriteriaDetail,
   CriteriaEntry,
   DashboardMetrics,
+  EvalLogEntry,
+  EvalProgress,
+  EvalRunStatus,
   LeaderboardResponse,
   LiveLogsResponse,
   LiveStats,
-  LlmModeResponse,
-  ManualRegistration,
+  LoginPrepareResponse,
+  ParticipantRoster,
   PromptInput,
-  SeedResult,
   SubmissionReceipt,
-  EvalLogEntry,
-  EvalRunStatus,
-  TestSuiteStatus,
 } from '@/types'
 
 const API_BASE: string = (import.meta.env.VITE_API_BASE_URL as string) ?? '/api'
@@ -59,6 +57,16 @@ export class ApiError extends Error {
   }
 }
 
+function withComp(path: string, competitionId?: string, extra?: Record<string, string | number | undefined>) {
+  const params = new URLSearchParams()
+  if (competitionId) params.set('competition_id', competitionId)
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  }
+  const qs = params.toString()
+  return qs ? `${path}?${qs}` : path
+}
+
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -76,7 +84,7 @@ async function request<T>(
     let message = 'Something went wrong. Please try again.'
     try {
       const body = (await res.json()) as { detail?: string }
-      if (body.detail) message = body.detail
+      if (typeof body.detail === 'string') message = body.detail
     } catch {
       /* ignore */
     }
@@ -88,26 +96,25 @@ async function request<T>(
 export const api = {
   getActiveCompetition: () => request<Competition>('/competitions/active'),
   getCompetition: (id: string) => request<CompetitionDetail>(`/competitions/${id}`),
-  loginWithQrImage: (competitionId: string, file: File) => {
+  loginWithQrImage: (competitionId: string, registrationNumber: string, file: File) => {
     const form = new FormData()
     form.append('image', file)
-    return request<AuthResponse>(`/auth/login/qr?competition_id=${competitionId}`, {
-      method: 'POST',
-      body: form,
-    })
+    return request<AuthResponse>(
+      withComp('/auth/login/qr', competitionId, { registration_number: registrationNumber }),
+      { method: 'POST', body: form },
+    )
   },
-  loginWithQrMessage: (competitionId: string, qrMessage: string) =>
+  loginWithQrMessage: (competitionId: string, registrationNumber: string, qrMessage: string) =>
     request<AuthResponse>('/auth/login/message', {
       method: 'POST',
-      body: JSON.stringify({ competition_id: competitionId, qr_message: qrMessage }),
-    }),
-  loginWithTest: (competitionId: string, identifier: string) =>
-    request<AuthResponse>('/auth/login/test', {
-      method: 'POST',
-      body: JSON.stringify({ competition_id: competitionId, identifier }),
+      body: JSON.stringify({
+        competition_id: competitionId,
+        registration_number: registrationNumber,
+        qr_message: qrMessage,
+      }),
     }),
   loginWithRegistrationNumber: (competitionId: string, registrationNumber: string) =>
-    request<AuthResponse>('/auth/login/registration-number', {
+    request<LoginPrepareResponse>('/auth/login/registration-number', {
       method: 'POST',
       body: JSON.stringify({
         competition_id: competitionId,
@@ -134,26 +141,24 @@ export const api = {
   leaderboard: (competitionId: string) =>
     request<LeaderboardResponse>(`/leaderboard/${competitionId}`),
 
-  // ---- Admin ----
   adminLogin: (username: string, password: string) =>
     request<AdminLoginResponse>(
       '/admin/login',
       { method: 'POST', body: JSON.stringify({ username, password }) },
       null,
     ),
-  adminDashboard: (token?: string) =>
-    request<{ metrics: DashboardMetrics }>('/admin/dashboard', {}, token ?? getAdminToken()),
-  adminSubmissions: (token?: string) =>
-    request<unknown[]>('/admin/submissions', {}, token ?? getAdminToken()),
-  adminEvaluations: (token?: string) =>
-    request<unknown[]>('/admin/evaluations', {}, token ?? getAdminToken()),
+  adminDashboard: (competitionId: string, token?: string) =>
+    request<{ metrics: DashboardMetrics }>(
+      withComp('/admin/dashboard', competitionId),
+      {},
+      token ?? getAdminToken(),
+    ),
   adminStartEval: (
     body: {
       competition_id?: string
       batch_size?: number
       concurrency?: number
       max_retries?: number
-      llm_mode?: string
     },
     token?: string,
   ) =>
@@ -164,6 +169,24 @@ export const api = {
     ),
   adminEvalRun: (token?: string) =>
     request<EvalRunStatus>('/admin/evaluations/run', {}, token ?? getAdminToken()),
+  adminEvalStatus: (competitionId: string, token?: string) =>
+    request<EvalProgress>(
+      withComp('/admin/eval-status', competitionId),
+      {},
+      token ?? getAdminToken(),
+    ),
+  adminLeaderboard: (competitionId: string, token?: string) =>
+    request<LeaderboardResponse>(
+      withComp('/admin/leaderboard', competitionId),
+      {},
+      token ?? getAdminToken(),
+    ),
+  adminParticipants: (competitionId: string, token?: string) =>
+    request<ParticipantRoster>(
+      withComp('/admin/participants', competitionId),
+      {},
+      token ?? getAdminToken(),
+    ),
   adminEvalLogs: (since = 0, token?: string) =>
     request<{ logs: EvalLogEntry[]; run: EvalRunStatus }>(
       `/admin/evaluations/logs?since=${since}`,
@@ -178,58 +201,68 @@ export const api = {
       {},
       token ?? getAdminToken(),
     ),
-  adminAnalytics: (token?: string) =>
-    request<{ analytics: Analytics }>('/admin/analytics', {}, token ?? getAdminToken()),
-  adminTestCleanup: (token?: string) =>
-    request<CleanupResult>('/admin/test/cleanup', { method: 'POST' }, token ?? getAdminToken()),
-  adminSeedTestData: (participantCount: number, token?: string) =>
-    request<SeedResult>(
-      '/admin/test/seed',
-      { method: 'POST', body: JSON.stringify({ participant_count: participantCount }) },
+  adminAnalytics: (competitionId: string, token?: string) =>
+    request<{ analytics: Analytics }>(
+      withComp('/admin/analytics', competitionId),
+      {},
       token ?? getAdminToken(),
     ),
-  adminTestStatus: (token?: string) =>
-    request<TestSuiteStatus>('/admin/test/status', {}, token ?? getAdminToken()),
-  adminGetLlmMode: (token?: string) =>
-    request<LlmModeResponse>('/admin/test/llm-mode', {}, token ?? getAdminToken()),
-  adminSetLlmMode: (mode: 'dummy' | 'gemini', token?: string) =>
-    request<LlmModeResponse>(
-      '/admin/test/llm-mode',
-      { method: 'POST', body: JSON.stringify({ mode }) },
+  adminPublishLeaderboard: (competitionId: string, token?: string) =>
+    request<{ success: boolean; visible: boolean }>(
+      withComp('/admin/leaderboard/publish', competitionId),
+      { method: 'POST' },
       token ?? getAdminToken(),
     ),
-  adminPublishLeaderboard: (token?: string) =>
-    request<{ success: boolean; visible: boolean }>('/admin/leaderboard/publish', { method: 'POST' }, token ?? getAdminToken()),
-  adminUnpublishLeaderboard: (token?: string) =>
-    request<{ success: boolean; visible: boolean }>('/admin/leaderboard/unpublish', { method: 'POST' }, token ?? getAdminToken()),
-  adminOpenCompetition: (token?: string) =>
-    request<{ success: boolean; status: string | null }>('/admin/competition/open', { method: 'POST' }, token ?? getAdminToken()),
-  adminCloseCompetition: (token?: string) =>
-    request<{ success: boolean; status: string | null }>('/admin/competition/close', { method: 'POST' }, token ?? getAdminToken()),
-  adminCriteriaList: (token?: string) =>
-    request<CriteriaEntry[]>('/admin/criteria', {}, token ?? getAdminToken()),
-  adminCriteriaDetail: (category: number, token?: string) =>
-    request<CriteriaDetail>(`/admin/criteria/${category}`, {}, token ?? getAdminToken()),
-  adminCriteriaUpload: (category: number, file: File, token?: string) => {
+  adminUnpublishLeaderboard: (competitionId: string, token?: string) =>
+    request<{ success: boolean; visible: boolean }>(
+      withComp('/admin/leaderboard/unpublish', competitionId),
+      { method: 'POST' },
+      token ?? getAdminToken(),
+    ),
+  adminOpenCompetition: (competitionId: string, token?: string) =>
+    request<{ success: boolean; status: string | null }>(
+      withComp('/admin/competition/open', competitionId),
+      { method: 'POST' },
+      token ?? getAdminToken(),
+    ),
+  adminCloseCompetition: (competitionId: string, token?: string) =>
+    request<{ success: boolean; status: string | null }>(
+      withComp('/admin/competition/close', competitionId),
+      { method: 'POST' },
+      token ?? getAdminToken(),
+    ),
+  adminCriteriaList: (competitionId: string, token?: string) =>
+    request<CriteriaEntry[]>(withComp('/admin/criteria', competitionId), {}, token ?? getAdminToken()),
+  adminCriteriaDetail: (competitionId: string, category: number, token?: string) =>
+    request<CriteriaDetail>(
+      withComp(`/admin/criteria/${category}`, competitionId),
+      {},
+      token ?? getAdminToken(),
+    ),
+  adminCriteriaUpload: (competitionId: string, category: number, file: File, token?: string) => {
     const form = new FormData()
-    form.append('category', String(category))
     form.append('file', file)
     return request<CriteriaEntry>(
-      `/admin/criteria?category=${category}`,
+      withComp('/admin/criteria', competitionId, { category }),
       { method: 'POST', body: form },
       token ?? getAdminToken(),
     )
   },
-  adminExportUrl: (category?: number) =>
-    `/admin/export/csv${category ? `?category=${category}` : ''}`,
-  adminListRegistrations: (token?: string) =>
-    request<ManualRegistration[]>('/admin/registrations', {}, token ?? getAdminToken()),
+  adminCopyLiveCriteria: (competitionId: string, token?: string) =>
+    request<{ success: boolean; copied: number }>(
+      withComp('/admin/criteria/copy-live', competitionId),
+      { method: 'POST' },
+      token ?? getAdminToken(),
+    ),
+  adminExportUrl: (competitionId: string, category?: number) =>
+    withComp('/admin/export/csv', competitionId, category ? { category } : undefined),
   adminCreateRegistration: (
+    competitionId: string,
     body: { registration_number: string; display_name?: string; email?: string },
     token?: string,
   ) =>
     request<{ success: boolean; id: string; registration_number?: string; display_name?: string }>(
-      '/admin/registrations',
+      withComp('/admin/registrations', competitionId),
       { method: 'POST', body: JSON.stringify(body) },
       token ?? getAdminToken(),
     ),

@@ -18,7 +18,7 @@ def get_client() -> Client:
 
     # Supabase's edge proxy intermittently terminates HTTP/2 keep-alive
     # connections (httpcore.ConnectionTerminated / RemoteProtocolError), which
-    # surfaces as sporadic 500s on heavy queries (e.g. /admin/test/status).
+    # surfaces as sporadic 500s on heavy admin aggregations.
     # Force HTTP/1.1 and add connection retries to make reads/writes resilient.
     transport = httpx.HTTPTransport(retries=2)
     http_client = httpx.Client(http2=False, transport=transport, timeout=60.0)
@@ -42,6 +42,66 @@ def db() -> Client:
     if _client is None:
         _client = get_client()
     return _client
+
+
+REST_PAGE = 1000
+
+
+def fetch_all(
+    table: str,
+    select: str,
+    *,
+    eq: dict[str, Any] | None = None,
+    order: str | None = None,
+    descending: bool = False,
+) -> list[dict[str, Any]]:
+    """Range-paginate every matching row past PostgREST's 1000-row cap."""
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        builder = db().table(table).select(select)
+        for key, value in (eq or {}).items():
+            builder = builder.eq(key, value)
+        if order:
+            builder = builder.order(order, desc=descending)
+        page = builder.range(offset, offset + REST_PAGE - 1).execute().data or []
+        rows.extend(page)
+        if len(page) < REST_PAGE:
+            break
+        offset += REST_PAGE
+    return rows
+
+
+def fetch_in(
+    table: str,
+    select: str,
+    column: str,
+    values: list[str],
+    *,
+    order: str | None = None,
+    descending: bool = False,
+    page_size: int = 200,
+) -> list[dict[str, Any]]:
+    """Fetch rows where ``column`` is any of ``values``.
+
+    Values are chunked, and each chunk is range-paginated so a single PostgREST
+    request never silently truncates at the 1000-row default cap (e.g. 300
+    submissions × 5 responses = 1500 rows).
+    """
+    rows: list[dict[str, Any]] = []
+    for i in range(0, len(values), page_size):
+        chunk = values[i : i + page_size]
+        offset = 0
+        while True:
+            builder = db().table(table).select(select).in_(column, chunk)
+            if order:
+                builder = builder.order(order, desc=descending)
+            page = builder.range(offset, offset + REST_PAGE - 1).execute().data or []
+            rows.extend(page)
+            if len(page) < REST_PAGE:
+                break
+            offset += REST_PAGE
+    return rows
 
 
 def rpc(procedure: str, params: dict[str, Any] | None = None) -> Any:

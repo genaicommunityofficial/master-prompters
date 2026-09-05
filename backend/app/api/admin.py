@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
@@ -12,6 +11,7 @@ from app.services import eval_criteria_service
 from app.services import eval_run_service
 from app.services import leaderboard_service as lb_svc
 from app.services import request_log_service
+from app.services.submission_service import EvalConfigError
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -48,21 +48,28 @@ class DashboardResponse(BaseModel):
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
-def dashboard(payload: dict = Depends(require_admin)) -> DashboardResponse:
-    competition_id = payload["competition_id"]
-    return DashboardResponse(metrics=admin_service.get_dashboard(competition_id))
+def dashboard(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> DashboardResponse:
+    cid = _scoped_competition(payload, competition_id)
+    return DashboardResponse(metrics=admin_service.get_dashboard(cid))
 
 
 @router.get("/submissions")
-def admin_submissions(payload: dict = Depends(require_admin)) -> list[dict]:
-    competition_id = payload["competition_id"]
-    return admin_service.get_admin_submissions(competition_id)
+def admin_submissions(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> list[dict]:
+    return admin_service.get_admin_submissions(_scoped_competition(payload, competition_id))
 
 
 @router.get("/evaluations")
-def admin_evaluations(payload: dict = Depends(require_admin)) -> list[dict]:
-    competition_id = payload["competition_id"]
-    return admin_service.get_admin_evaluations(competition_id)
+def admin_evaluations(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> list[dict]:
+    return admin_service.get_admin_evaluations(_scoped_competition(payload, competition_id))
 
 
 LIVE_COMPETITION_FALLBACK = "competition_2026"
@@ -74,7 +81,6 @@ class EvalStartRequest(BaseModel):
     batch_size: int = 8
     concurrency: int = 4
     max_retries: int = 3
-    llm_mode: str | None = None
 
 
 def _allowed_eval_competitions(payload: dict) -> set[str]:
@@ -82,22 +88,29 @@ def _allowed_eval_competitions(payload: dict) -> set[str]:
     return {live, TEST_COMPETITION_ID}
 
 
+def _scoped_competition(payload: dict, requested: str | None) -> str:
+    live = payload.get("competition_id") or LIVE_COMPETITION_FALLBACK
+    competition_id = requested or live
+    if competition_id not in _allowed_eval_competitions(payload):
+        raise HTTPException(status_code=403, detail="Competition is not allowed for this admin.")
+    return competition_id
+
+
 @router.post("/evaluations/start")
 def start_evaluation(
     body: EvalStartRequest,
     payload: dict = Depends(require_admin),
 ) -> dict:
-    live = payload.get("competition_id") or LIVE_COMPETITION_FALLBACK
-    competition_id = body.competition_id or live
-    if competition_id not in _allowed_eval_competitions(payload):
-        raise HTTPException(status_code=403, detail="Competition is not allowed for this admin.")
-    return eval_run_service.start(
-        competition_id=competition_id,
-        batch_size=body.batch_size,
-        concurrency=body.concurrency,
-        max_retries=body.max_retries,
-        llm_mode=body.llm_mode,
-    )
+    competition_id = _scoped_competition(payload, body.competition_id)
+    try:
+        return eval_run_service.start(
+            competition_id=competition_id,
+            batch_size=body.batch_size,
+            concurrency=body.concurrency,
+            max_retries=body.max_retries,
+        )
+    except EvalConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/evaluations/run")
@@ -150,10 +163,13 @@ class AnalyticsResponse(BaseModel):
 
 
 @router.get("/analytics", response_model=AnalyticsResponse)
-def analytics(payload: dict = Depends(require_admin)) -> AnalyticsResponse:
-    competition_id = payload["competition_id"]
+def analytics(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> AnalyticsResponse:
+    cid = _scoped_competition(payload, competition_id)
     return AnalyticsResponse(
-        analytics=admin_analytics_service.get_analytics(competition_id),
+        analytics=admin_analytics_service.get_analytics(cid),
     )
 
 
@@ -167,11 +183,12 @@ class ExportResponse(BaseModel):
 def export_prompts(
     category: Annotated[int, Query(ge=1, le=5)] | None = None,
     format: str = "csv",
+    competition_id: str | None = Query(default=None),
     payload: dict = Depends(require_admin),
 ) -> ExportResponse:
-    competition_id = payload["competition_id"]
+    cid = _scoped_competition(payload, competition_id)
     data, columns, filename = admin_analytics_service.build_export(
-        competition_id,
+        cid,
         category=category,
     )
     # CSV is returned by the dedicated CSV route below; this route reports shape.
@@ -181,13 +198,14 @@ def export_prompts(
 @router.get("/export/csv")
 def export_prompts_csv(
     category: Annotated[int, Query(ge=1, le=5)] | None = None,
+    competition_id: str | None = Query(default=None),
     payload: dict = Depends(require_admin),
 ):
     from fastapi.responses import Response
 
-    competition_id = payload["competition_id"]
+    cid = _scoped_competition(payload, competition_id)
     csv_bytes, columns, filename = admin_analytics_service.build_export_csv(
-        competition_id,
+        cid,
         category=category,
     )
     return Response(
@@ -212,10 +230,13 @@ class CriteriaListEntry(BaseModel):
 
 
 @router.get("/criteria", response_model=list[CriteriaListEntry])
-def list_criteria(payload: dict = Depends(require_admin)) -> list[dict]:
+def list_criteria(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> list[dict]:
     """List the uploaded per-category markdown rubrics for this competition."""
-    competition_id = payload["competition_id"]
-    rows = eval_criteria_service.get_criteria_for_competition(competition_id)
+    cid = _scoped_competition(payload, competition_id)
+    rows = eval_criteria_service.get_criteria_for_competition(cid)
     out = []
     for qn in sorted(rows):
         r = rows[qn]
@@ -233,10 +254,11 @@ def list_criteria(payload: dict = Depends(require_admin)) -> list[dict]:
 @router.get("/criteria/{category}")
 def get_criteria(
     category: Annotated[int, Path(ge=1, le=5)],
+    competition_id: str | None = Query(default=None),
     payload: dict = Depends(require_admin),
 ) -> dict:
-    competition_id = payload["competition_id"]
-    rows = eval_criteria_service.get_criteria_for_competition(competition_id)
+    cid = _scoped_competition(payload, competition_id)
+    rows = eval_criteria_service.get_criteria_for_competition(cid)
     r = rows.get(category)
     if not r:
         return {"question_number": category, "file_name": None, "content_md": ""}
@@ -251,16 +273,17 @@ def get_criteria(
 async def upload_criteria(
     category: Annotated[int, Query(ge=1, le=5)],
     file: UploadFile,
+    competition_id: str | None = Query(default=None),
     payload: dict = Depends(require_admin),
 ) -> CriteriaUploadResponse:
     """Upload/replace the markdown rubric for a single category."""
-    competition_id = payload["competition_id"]
+    cid = _scoped_competition(payload, competition_id)
     content = (await file.read()).decode("utf-8", errors="replace")
     if not content.strip():
         raise HTTPException(status_code=400, detail="Criteria file is empty.")
     name = file.filename or "criteria.md"
     saved = eval_criteria_service.upsert_criteria(
-        competition_id=competition_id,
+        competition_id=cid,
         question_number=category,
         file_name=name,
         content_md=content,
@@ -272,108 +295,52 @@ async def upload_criteria(
     )
 
 
-class LlmModeRequest(BaseModel):
-    mode: str  # "dummy" or "gemini"
+@router.post("/criteria/copy-live")
+def copy_live_criteria(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    """Copy live-competition rubrics onto the currently scoped competition (test)."""
+    dest = _scoped_competition(payload, competition_id)
+    live = payload.get("competition_id") or LIVE_COMPETITION_FALLBACK
+    if dest == live:
+        raise HTTPException(status_code=400, detail="Switch to Test mode to copy live rubrics.")
+    written = eval_criteria_service.copy_criteria(live, dest)
+    return {"success": True, "copied": written, "source": live, "destination": dest}
 
 
-@router.post("/test/llm-mode")
-def set_llm_mode(body: LlmModeRequest, payload: dict = Depends(require_admin)) -> dict:
-    """Set the LLM mode used by the evaluator for the next run."""
-    if body.mode not in ("dummy", "gemini"):
-        raise HTTPException(status_code=400, detail="Mode must be 'dummy' or 'gemini'")
-    os.environ["ENABLE_DUMMY_LLM"] = "0" if body.mode == "gemini" else "1"
-    return {"mode": body.mode, "message": f"LLM mode set to {body.mode}"}
+@router.get("/eval-status")
+def eval_status(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    """Optimized evaluation-pipeline state for an admin-scoped competition."""
+    from app.services.eval_status_service import get_eval_progress
+
+    return get_eval_progress(_scoped_competition(payload, competition_id))
 
 
-@router.get("/test/llm-mode")
-def get_llm_mode(payload: dict = Depends(require_admin)) -> dict:
-    mode = "gemini" if os.getenv("ENABLE_DUMMY_LLM", "1") == "0" else "dummy"
-    return {"mode": mode}
+@router.get("/leaderboard")
+def admin_leaderboard(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    """Admin view of a competition leaderboard, even before it is published."""
+    return lb_svc.get_leaderboard(_scoped_competition(payload, competition_id), ignore_visibility=True)
 
 
-class SeedRequest(BaseModel):
-    participant_count: int = 50
+@router.get("/participation")
+def participation_funnel(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    """Registered -> logged in -> submitted funnel for an admin-scoped competition."""
+    from app.services.eval_status_service import FunnelMigrationError, get_participation_funnel
 
-
-@router.post("/test/seed")
-def seed_test_data(body: SeedRequest, payload: dict = Depends(require_admin)) -> dict:
-    """Seed the TEST competition with realistic test data."""
-    from app.services import test_seeding_service
-
-    if body.participant_count < 1 or body.participant_count > 1000:
-        raise HTTPException(status_code=400, detail="Participant count must be 1-1000")
-    result = test_seeding_service.seed_test_data(body.participant_count)
-    return {"success": True, **result}
-
-
-@router.post("/test/cleanup")
-def cleanup_test_data(payload: dict = Depends(require_admin)) -> dict:
-    """Clean up all TEST competition data."""
-    from app.services import test_seeding_service
-
-    result = test_seeding_service.cleanup_test_data()
-    return {"success": True, **result}
-
-
-@router.get("/test/status")
-def test_status(payload: dict = Depends(require_admin)) -> dict:
-    """Get current TEST competition stats."""
-    from app.db import db
-
-    store = db()
-    subs = (
-        store.table("pc_submissions")
-        .select("id")
-        .eq("competition_id", "competition_test")
-        .execute()
-        .data
-        or []
-    )
-    sub_ids = [s["id"] for s in subs]
-    participants = (
-        store.table("pc_participants")
-        .select("id", head=True, count="exact")
-        .eq("competition_id", "competition_test")
-        .execute()
-    )
-    participant_count = participants.count if hasattr(participants, "count") and participants.count is not None else len(sub_ids)
-    responses = 0
-    evaluated = 0
-    if sub_ids:
-        # Response ids in chunks of 100
-        resp_by_sub: list[str] = []
-        for i in range(0, len(sub_ids), 100):
-            chunk = sub_ids[i : i + 100]
-            resp_rows = (
-                store.table("pc_responses")
-                .select("id")
-                .in_("submission_id", chunk)
-                .execute()
-                .data
-                or []
-            )
-            resp_by_sub.extend(r["id"] for r in resp_rows)
-        responses = len(resp_by_sub)
-        if resp_by_sub:
-            evaluated = 0
-            for i in range(0, len(resp_by_sub), 100):
-                chunk = resp_by_sub[i : i + 100]
-                ev_rows = (
-                    store.table("pc_evaluations")
-                    .select("id")
-                    .in_("response_id", chunk)
-                    .execute()
-                    .data
-                    or []
-                )
-                evaluated += len(ev_rows)
-    return {
-        "participants": participant_count,
-        "submissions": len(sub_ids),
-        "responses": responses,
-        "evaluated": evaluated,
-        "pending": responses - evaluated,
-    }
+    try:
+        return get_participation_funnel(_scoped_competition(payload, competition_id))
+    except FunnelMigrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 class LeaderboardPublishResponse(BaseModel):
@@ -387,12 +354,28 @@ class RegistrationCreateRequest(BaseModel):
     email: str | None = None
 
 
-@router.get("/registrations")
-def list_registrations(payload: dict = Depends(require_admin)) -> list[dict]:
-    """List manually-registered participants (those with a registration number)."""
-    competition_id = payload["competition_id"]
+@router.get("/participants")
+def list_participants(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    """Event registrations (read-only) merged with admin-added pc_participants."""
+    cid = _scoped_competition(payload, competition_id)
     try:
-        return admin_registration_service.list_registrations(competition_id)
+        return admin_registration_service.list_roster(cid)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not load participants: {exc}") from exc
+
+
+@router.get("/registrations")
+def list_registrations(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> list[dict]:
+    """Admin-added extras only (never writes to registrations)."""
+    cid = _scoped_competition(payload, competition_id)
+    try:
+        return admin_registration_service.list_registrations(cid)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not load registrations: {exc}") from exc
 
@@ -400,13 +383,14 @@ def list_registrations(payload: dict = Depends(require_admin)) -> list[dict]:
 @router.post("/registrations")
 def create_registration(
     body: RegistrationCreateRequest,
+    competition_id: str | None = Query(default=None),
     payload: dict = Depends(require_admin),
 ) -> dict:
-    """Manually register a participant by official registration number."""
-    competition_id = payload["competition_id"]
+    """Manually register a participant into pc_participants, not registrations."""
+    cid = _scoped_competition(payload, competition_id)
     try:
         row = admin_registration_service.register_participant(
-            competition_id=competition_id,
+            competition_id=cid,
             registration_number=body.registration_number,
             display_name=body.display_name,
             email=body.email,
@@ -424,28 +408,42 @@ def create_registration(
 
 
 @router.post("/competition/open")
-def open_competition(payload: dict = Depends(require_admin)) -> dict:
-    competition_id = payload["competition_id"]
-    comp = competition_service.set_status(competition_id, "OPEN")
+def open_competition(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    cid = _scoped_competition(payload, competition_id)
+    comp = competition_service.set_status(cid, "OPEN")
     return {"success": True, "status": comp.get("status") if comp else None}
 
 
 @router.post("/competition/close")
-def close_competition(payload: dict = Depends(require_admin)) -> dict:
-    competition_id = payload["competition_id"]
-    comp = competition_service.set_status(competition_id, "CLOSED")
+def close_competition(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    cid = _scoped_competition(payload, competition_id)
+    # TEST competitions use status TEST when not open; closing live uses CLOSED.
+    next_status = "TEST" if cid == TEST_COMPETITION_ID else "CLOSED"
+    comp = competition_service.set_status(cid, next_status)
     return {"success": True, "status": comp.get("status") if comp else None}
 
 
 @router.post("/leaderboard/publish", response_model=LeaderboardPublishResponse)
-def publish_leaderboard(payload: dict = Depends(require_admin)) -> LeaderboardPublishResponse:
-    competition_id = payload["competition_id"]
-    lb_svc.set_leaderboard_visible(competition_id, True)
+def publish_leaderboard(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> LeaderboardPublishResponse:
+    cid = _scoped_competition(payload, competition_id)
+    lb_svc.set_leaderboard_visible(cid, True)
     return LeaderboardPublishResponse(success=True, visible=True)
 
 
 @router.post("/leaderboard/unpublish", response_model=LeaderboardPublishResponse)
-def unpublish_leaderboard(payload: dict = Depends(require_admin)) -> LeaderboardPublishResponse:
-    competition_id = payload["competition_id"]
-    lb_svc.set_leaderboard_visible(competition_id, False)
+def unpublish_leaderboard(
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> LeaderboardPublishResponse:
+    cid = _scoped_competition(payload, competition_id)
+    lb_svc.set_leaderboard_visible(cid, False)
     return LeaderboardPublishResponse(success=True, visible=False)

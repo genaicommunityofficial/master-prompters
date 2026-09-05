@@ -77,3 +77,22 @@ def get_criteria_map_for_eval(competition_id: str) -> dict[int, str]:
         qn: r["content_md"]
         for qn, r in get_criteria_for_competition(competition_id).items()
     }
+
+
+def copy_criteria(source_competition_id: str, dest_competition_id: str) -> int:
+    """Copy every rubric from one competition onto another. Returns rows written."""
+    if source_competition_id == dest_competition_id:
+        return 0
+    source = get_criteria_for_competition(source_competition_id)
+    written = 0
+    store = db()
+    for qn, row in source.items():
+        _upsert_criteria(
+            store,
+            competition_id=dest_competition_id,
+            question_number=qn,
+            file_name=row.get("file_name") or "criteria.md",
+            content_md=row.get("content_md") or "",
+        )
+        written += 1
+    return written

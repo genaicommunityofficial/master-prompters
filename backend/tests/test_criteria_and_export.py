@@ -29,16 +29,6 @@ def test_inject_md_is_included_for_matching_question():
     assert out2 == prompt
 
 
-def test_evaluator_receives_criteria_for_dummy_evaluator(monkeypatch):
-    """The dummy evaluator must still work even when criteria is injected."""
-    ev = submission_service.LogOnlyEvaluator()
-    prompt = "A sufficiently long synthetic prompt for evaluation."
-    question = {"id": "q1", "question_number": 1, "title": "X"}
-    rubric = "# Rubric\n\nClarity matters."
-    result = ev.evaluate_sync(prompt, question, {"criteria_md": rubric})
-    assert "score" in result
-
-
 def test_close_status_rejects_submission():
     from app.services.submission_service import validate_submission
 
@@ -108,3 +98,25 @@ def test_criteria_service_upserts_with_hash(monkeypatch):
                           file_name="x.md", content_md="## X\n\nbody")
     assert store.rows[0]["question_number"] == 2
     assert len(store.rows[0]["content_hash"]) == 64
+
+
+def test_copy_criteria_writes_each_source_row(monkeypatch):
+    written: list[tuple] = []
+
+    monkeypatch.setattr(
+        crit,
+        "get_criteria_for_competition",
+        lambda cid: {1: {"file_name": "a.md", "content_md": "# A"}, 2: {"file_name": "b.md", "content_md": "# B"}}
+        if cid == "live"
+        else {},
+    )
+
+    def fake_upsert(store, *, competition_id, question_number, file_name, content_md):
+        written.append((competition_id, question_number, file_name, content_md))
+        return {}
+
+    monkeypatch.setattr(crit, "_upsert_criteria", fake_upsert)
+    monkeypatch.setattr(crit, "db", lambda: object())
+    assert crit.copy_criteria("live", "competition_test") == 2
+    assert written[0][0] == "competition_test"
+    assert {w[1] for w in written} == {1, 2}

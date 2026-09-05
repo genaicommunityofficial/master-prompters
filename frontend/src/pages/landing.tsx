@@ -71,7 +71,7 @@ export default function LandingPage() {
     <PageShell>
       {focusingLogin ? (
         <p className="mb-0 mt-4 text-center text-sm font-medium text-emerald-600">
-          Please sign in with your QR code to continue.
+          Please sign in with your registration number to continue.
         </p>
       ) : null}
       <section className="relative overflow-hidden border-b border-border/60">
@@ -89,7 +89,7 @@ export default function LandingPage() {
             </h1>
             <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground animate-fade-in-up animation-delay-200">
               {competition?.description ??
-                'Write five prompts, each judged independently. Sign in with your registration QR code to begin.'}
+                'Write five prompts, each judged independently. Sign in with your registration number, then confirm with your QR code.'}
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-in-up animation-delay-300">
               <Button
@@ -140,14 +140,14 @@ export default function LandingPage() {
               {token ? 'Welcome back' : 'Sign in to participate'}
             </h2>
             <p className="mt-4 text-muted-foreground leading-relaxed">
-              Use the QR code you received during registration. Once signed in you
+              Enter your registration number, then scan the QR code from registration. Once signed in you
               will answer five questions with a prompt each, review, and submit. Your
               responses cannot be edited after submission.
             </p>
             <div className="mt-6 space-y-2 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">1</span>
-                <span>Scan or paste your QR code</span>
+                <span>Enter your registration number, then scan your QR code</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">2</span>

@@ -193,7 +193,15 @@ async def submit_individual(
 
 @router.get("/submissions/exists", response_model=dict)
 async def submission_exists(payload: dict = Depends(get_current_participant)) -> dict:
+    from uuid import UUID
+
     participant_id = payload["sub"]
     competition_id = payload.get("competition_id")
+    try:
+        UUID(str(participant_id))
+    except (ValueError, TypeError):
+        return {"submitted": False}
+    if not competition_id:
+        return {"submitted": False}
     existing = sub_svc.already_submitted(participant_id, competition_id)
     return {"submitted": existing is not None}

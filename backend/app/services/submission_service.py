@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import json
-import os
-import random
 import time
 from typing import Callable
 
 from app.db import db as _db_instance
 from app.services import competition_service as comp_svc
+from app.services.eval_cost import estimate_cost_usd
 
 BATCH_SIZE = 10
 
 
 class SubmissionError(Exception):
+    status_code: int = 400
+
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class EvalConfigError(Exception):
+    """Raised when the LLM cannot be used, e.g. missing API key."""
+
     status_code: int = 400
 
     def __init__(self, message: str, status_code: int = 400):
@@ -223,102 +230,15 @@ def _refresh_submission_state(sub: dict, participant_id: str) -> dict:
     return sub
 
 
-class GeminiEvaluator:
-    """Abstraction over the LLM provider.
-
-    Only the evaluator touches Gemini. The submission pipeline enqueues work
-    and never waits on the model, so the participant request returns fast.
-    """
-
-    provider: str = "gemini"
-    model: str = "gemini-2.5-flash"
-
-    async def evaluate(self, prompt_text: str, question: dict, evaluation_config: dict) -> dict:
-        raise NotImplementedError
-
-
-class LogOnlyEvaluator(GeminiEvaluator):
-    """Dummy LLM evaluator that simulates realistic evaluation behavior.
-
-    Used when GEMINI_API_KEY is not set, or when ENABLE_DUMMY_LLM=1 is forced.
-    Produces scores derived from prompt text (so re-evaluating the same prompt
-    gives the same result) but jittered within a realistic range. Latency and
-    token counts are simulated to mimic real traffic.
-    """
-
-    provider: str = "dummy"
-    model: str = "dummy-llm-v1"
-
-    def evaluate_sync(self, prompt_text: str, question: dict, evaluation_config: dict) -> dict:
-        seed_material = f"{question.get('id', '')}::{prompt_text}".encode("utf-8")
-        seed = int(hashlib.sha256(seed_material).hexdigest(), 16) % (2**32)
-        rng = random.Random(seed)
-        base_score = 60 + rng.uniform(0, 35)
-        length_bonus = min(5.0, len(prompt_text) / 200.0)
-        score = round(min(99.0, base_score + length_bonus), 2)
-        latency_ms = int(200 + rng.uniform(0, 1000) + min(800, len(prompt_text) // 4))
-        input_tokens = max(50, len(prompt_text) // 4)
-        output_tokens = 60 + rng.randint(0, 120)
-        thinking_tokens = 40 + rng.randint(0, 80)
-        criteria = {
-            "clarity": round(score * rng.uniform(0.85, 1.0), 2),
-            "specificity": round(score * rng.uniform(0.80, 1.0), 2),
-            "creativity": round(score * rng.uniform(0.80, 1.05), 2),
-            "feasibility": round(score * rng.uniform(0.85, 1.0), 2),
-        }
-        summary = (
-            f"Dummy LLM evaluation: prompt demonstrates {rng.choice(['strong', 'solid', 'adequate', 'notable'])} "
-            f"quality across criteria. Length: {len(prompt_text)} chars."
-        )
-        if evaluation_config.get("criteria_md"):
-            summary += " Scored against the uploaded per-category rubric."
-        return {
-            "score": score,
-            "criteria_scores": criteria,
-            "summary": summary,
-            "model": self.model,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "thinking_tokens": thinking_tokens,
-            "latency_ms": latency_ms,
-        }
-
-    async def evaluate(self, prompt_text: str, question: dict, evaluation_config: dict) -> dict:
-        result = self.evaluate_sync(prompt_text, question, evaluation_config)
-        latency_ms = int(result.get("latency_ms") or 0)
-        if os.getenv("EVAL_FAST_DUMMY", "1") != "0":
-            await asyncio.sleep(0)
-        else:
-            await asyncio.sleep(min(latency_ms, 400) / 1000.0)
-        return result
-
-    def batch_evaluate_sync(
-        self, items: list[dict], question: dict, evaluation_config: dict
-    ) -> list[dict]:
-        """Evaluate a batch of prompts sharing the same question/criteria."""
-        return [
-            self.evaluate_sync(item["prompt_text"], question, evaluation_config)
-            for item in items
-        ]
-
-
-def get_evaluator() -> Callable:
-    """Pick the appropriate evaluator.
-
-    If GEMINI_API_KEY is set AND ENABLE_DUMMY_LLM is not '1', return the real
-    Gemini evaluator. Otherwise return the LogOnlyEvaluator. Currently the
-    real Gemini client is not wired — so the LogOnlyEvaluator is the default
-    until that integration lands. The flag exists so admins can opt-in
-    explicitly for the test suite.
-    """
+def ensure_gemini_configured() -> None:
+    """Raises EvalConfigError unless a real Gemini API key is configured."""
     from app.config import settings
 
-    if os.getenv("ENABLE_DUMMY_LLM", "1") == "1":
-        return LogOnlyEvaluator().evaluate
     if not settings.gemini_api_key:
-        return LogOnlyEvaluator().evaluate
-    # Real Gemini evaluator would be returned here. Until then, fall back.
-    return LogOnlyEvaluator().evaluate
+        raise EvalConfigError(
+            "Gemini API key is not configured on the server. "
+            "Set GEMINI_API_KEY before starting an evaluation run."
+        )
 
 
 def run_evaluator(
@@ -327,14 +247,14 @@ def run_evaluator(
     evaluation_config: dict,
     criteria_md: str | None = None,
 ) -> dict:
-    """Synchronous eval entry used by the worker (avoids nested event loops)."""
-    if criteria_md:
-        evaluation_config = {**(evaluation_config or {}), "criteria_md": criteria_md}
-    from app.config import settings
-
-    if os.getenv("ENABLE_DUMMY_LLM", "1") == "1" or not settings.gemini_api_key:
-        return LogOnlyEvaluator().evaluate_sync(prompt_text, question, evaluation_config)
-    return asyncio.run(get_evaluator()(prompt_text, question, evaluation_config))
+    """Synchronous single prompt evaluation via the real Gemini LLM."""
+    results = run_batch_evaluator(
+        items=[{"prompt_text": prompt_text}],
+        question=question,
+        evaluation_config=evaluation_config,
+        criteria_md=criteria_md,
+    )
+    return results[0]
 
 
 def run_batch_evaluator(
@@ -342,23 +262,15 @@ def run_batch_evaluator(
     question: dict,
     evaluation_config: dict,
     criteria_md: str | None = None,
-    llm_mode: str | None = None,
 ) -> list[dict]:
     """Evaluate a batch of prompts that share the same question and criteria.
 
     Each item must contain at least ``prompt_text``. Returns a list of result
-    dicts in the same order as *items*. ``llm_mode`` overrides the
-    ``ENABLE_DUMMY_LLM`` env var: ``"dummy"``/``"1"`` uses the in-process dummy,
-    ``"gemini"``/``"0"`` uses the real Gemini API.
+    dicts in the same order as *items*. Always uses the real Gemini API.
     """
+    ensure_gemini_configured()
     if criteria_md:
         evaluation_config = {**(evaluation_config or {}), "criteria_md": criteria_md}
-    from app.config import settings
-
-    mode = llm_mode or os.getenv("ENABLE_DUMMY_LLM", "1")
-    use_dummy = mode in ("1", "dummy")
-    if use_dummy or not settings.gemini_api_key:
-        return LogOnlyEvaluator().batch_evaluate_sync(items, question, evaluation_config)
     return _gemini_batch_evaluate(items, question, evaluation_config)
 
 
@@ -436,7 +348,7 @@ def _gemini_batch_evaluate(
 
     results: list[dict] = []
     for i, entry in enumerate(parsed):
-        results.append({
+        res = {
             "score": float(entry.get("score", 0)),
             "criteria_scores": entry.get("criteria_scores", {}),
             "summary": entry.get("summary", ""),
@@ -445,7 +357,14 @@ def _gemini_batch_evaluate(
             "output_tokens": per_output,
             "thinking_tokens": max(0, total_thinking // len(items)),
             "latency_ms": latency_ms,
-        })
+        }
+        res["estimated_cost_usd"] = estimate_cost_usd(
+            res["model"],
+            res["input_tokens"],
+            res["output_tokens"],
+            res["thinking_tokens"],
+        )
+        results.append(res)
     return results
 
 

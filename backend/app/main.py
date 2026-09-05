@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -63,6 +63,8 @@ if FRONTEND_DIST.is_dir():
     async def serve_spa(full_path: str) -> FileResponse:
         """Serve the SPA for all non-API routes. Static files take priority
         via the /assets mount above; everything else falls through here."""
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found.")
         file = FRONTEND_DIST / full_path
         if file.is_file():
             return FileResponse(file)

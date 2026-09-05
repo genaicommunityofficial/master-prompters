@@ -9,7 +9,7 @@ from typing import Any
 
 from app.db import db
 from app.services import evaluation_service
-from app.services.submission_service import job_payloads_for_responses
+from app.services.submission_service import ensure_gemini_configured, job_payloads_for_responses
 
 MAX_BATCH = 50
 MAX_CONCURRENCY = 16
@@ -31,7 +31,6 @@ _state: dict[str, Any] = {
     "processed": 0,
     "completed": 0,
     "failed": 0,
-    "llm_mode": None,
     "started_at": None,
     "finished_at": None,
     "error_message": None,
@@ -64,7 +63,6 @@ def reset_for_tests() -> None:
                 "processed": 0,
                 "completed": 0,
                 "failed": 0,
-                "llm_mode": None,
                 "started_at": None,
                 "finished_at": None,
                 "error_message": None,
@@ -205,8 +203,8 @@ def start(
     batch_size: int = 8,
     concurrency: int = 4,
     max_retries: int = 3,
-    llm_mode: str | None = None,
 ) -> dict[str, Any]:
+    ensure_gemini_configured()
     batch_size, concurrency, max_retries = clamp_eval_params(
         batch_size=batch_size,
         concurrency=concurrency,
@@ -220,7 +218,6 @@ def start(
         _state.update(
             {
                 "status": "running",
-                "accepted": True,
                 "competition_id": competition_id,
                 "batch_size": batch_size,
                 "concurrency": concurrency,
@@ -229,7 +226,6 @@ def start(
                 "processed": 0,
                 "completed": 0,
                 "failed": 0,
-                "llm_mode": llm_mode,
                 "started_at": time.time(),
                 "finished_at": None,
                 "error_message": None,
@@ -241,7 +237,6 @@ def start(
         batch_size=batch_size,
         concurrency=concurrency,
         max_retries=max_retries,
-        llm_mode=llm_mode,
     )
     return snapshot
 
@@ -302,15 +297,13 @@ def _run_thread(
     batch_size: int,
     concurrency: int,
     max_retries: int,
-    llm_mode: str | None = None,
 ) -> None:
     evaluation_service.MAX_ATTEMPTS = max_retries
     try:
         _append_log(
             "info",
-            f"Starting evaluation for {competition_id} (llm_mode={llm_mode or 'env'})",
+            f"Starting evaluation for {competition_id} (Gemini)",
             competition_id=competition_id,
-            llm_mode=llm_mode,
         )
         enqueued = enqueue_pending_jobs(competition_id)
         _set(enqueued=enqueued)
@@ -346,10 +339,10 @@ def _run_thread(
                 batch=len(job_ids),
             )
             # Shared Supabase HTTP client is not thread-safe on Windows.
-            # Batch by question group; evaluate with the selected LLM mode.
+            # Batch by question group; evaluate with the real Gemini LLM.
             try:
                 evaluation_service.process_queued_batch(
-                    limit=len(job_ids), llm_mode=llm_mode, competition_id=competition_id
+                    limit=len(job_ids), competition_id=competition_id
                 )
             except Exception as exc:  # noqa: BLE001
                 _append_log("error", f"Job worker error: {exc}")
