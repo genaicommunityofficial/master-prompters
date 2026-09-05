@@ -1,3 +1,5 @@
+import { decodeQrFromFile } from '@/lib/decodeQr'
+import { usesDirectSupabase } from '@/lib/runtime'
 import type {
   AdminLoginResponse,
   Analytics,
@@ -18,8 +20,13 @@ import type {
   PromptInput,
   SubmissionReceipt,
 } from '@/types'
+import { ApiError } from './errors'
+import { participantSupabase } from './participantSupabase'
 
-const API_BASE: string = (import.meta.env.VITE_API_BASE_URL as string) ?? '/api'
+export { ApiError }
+
+const API_BASE: string =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api'
 
 const TOKEN_KEY = 'pc_token'
 const ADMIN_TOKEN_KEY = 'pc_admin_token'
@@ -46,15 +53,6 @@ export function clearSession(): void {
 
 export function clearAdminSession(): void {
   window.localStorage.removeItem(ADMIN_TOKEN_KEY)
-}
-
-export class ApiError extends Error {
-  status: number
-  constructor(message: string, status: number) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-  }
 }
 
 function withComp(path: string, competitionId?: string, extra?: Record<string, string | number | undefined>) {
@@ -94,9 +92,19 @@ async function request<T>(
 }
 
 export const api = {
-  getActiveCompetition: () => request<Competition>('/competitions/active'),
-  getCompetition: (id: string) => request<CompetitionDetail>(`/competitions/${id}`),
-  loginWithQrImage: (competitionId: string, registrationNumber: string, file: File) => {
+  getActiveCompetition: () =>
+    usesDirectSupabase()
+      ? participantSupabase.getActiveCompetition()
+      : request<Competition>('/competitions/active'),
+  getCompetition: (id: string) =>
+    usesDirectSupabase()
+      ? participantSupabase.getCompetition(id)
+      : request<CompetitionDetail>(`/competitions/${id}`),
+  loginWithQrImage: async (competitionId: string, registrationNumber: string, file: File) => {
+    if (usesDirectSupabase()) {
+      const qrMessage = await decodeQrFromFile(file)
+      return participantSupabase.loginWithQrMessage(competitionId, registrationNumber, qrMessage)
+    }
     const form = new FormData()
     form.append('image', file)
     return request<AuthResponse>(
@@ -105,41 +113,54 @@ export const api = {
     )
   },
   loginWithQrMessage: (competitionId: string, registrationNumber: string, qrMessage: string) =>
-    request<AuthResponse>('/auth/login/message', {
-      method: 'POST',
-      body: JSON.stringify({
-        competition_id: competitionId,
-        registration_number: registrationNumber,
-        qr_message: qrMessage,
-      }),
-    }),
+    usesDirectSupabase()
+      ? participantSupabase.loginWithQrMessage(competitionId, registrationNumber, qrMessage)
+      : request<AuthResponse>('/auth/login/message', {
+          method: 'POST',
+          body: JSON.stringify({
+            competition_id: competitionId,
+            registration_number: registrationNumber,
+            qr_message: qrMessage,
+          }),
+        }),
   loginWithRegistrationNumber: (competitionId: string, registrationNumber: string) =>
-    request<LoginPrepareResponse>('/auth/login/registration-number', {
-      method: 'POST',
-      body: JSON.stringify({
-        competition_id: competitionId,
-        registration_number: registrationNumber,
-      }),
-    }),
+    usesDirectSupabase()
+      ? participantSupabase.loginWithRegistrationNumber(competitionId, registrationNumber)
+      : request<LoginPrepareResponse>('/auth/login/registration-number', {
+          method: 'POST',
+          body: JSON.stringify({
+            competition_id: competitionId,
+            registration_number: registrationNumber,
+          }),
+        }),
   submit: (competitionId: string, prompts: PromptInput[]) =>
-    request<SubmissionReceipt>('/submissions', {
-      method: 'POST',
-      body: JSON.stringify({
-        competition_id: competitionId,
-        prompts,
-      }),
-    }),
+    usesDirectSupabase()
+      ? participantSupabase.submit(competitionId, prompts, getToken())
+      : request<SubmissionReceipt>('/submissions', {
+          method: 'POST',
+          body: JSON.stringify({
+            competition_id: competitionId,
+            prompts,
+          }),
+        }),
   submitIndividual: (competitionId: string, prompt: PromptInput) =>
-    request<SubmissionReceipt>('/submissions/individual', {
-      method: 'POST',
-      body: JSON.stringify({
-        competition_id: competitionId,
-        ...prompt,
-      }),
-    }),
-  submissionExists: () => request<{ submitted: boolean }>('/submissions/exists'),
+    usesDirectSupabase()
+      ? participantSupabase.submitIndividual(competitionId, prompt, getToken())
+      : request<SubmissionReceipt>('/submissions/individual', {
+          method: 'POST',
+          body: JSON.stringify({
+            competition_id: competitionId,
+            ...prompt,
+          }),
+        }),
+  submissionExists: () =>
+    usesDirectSupabase()
+      ? participantSupabase.submissionExists(getToken())
+      : request<{ submitted: boolean }>('/submissions/exists'),
   leaderboard: (competitionId: string) =>
-    request<LeaderboardResponse>(`/leaderboard/${competitionId}`),
+    usesDirectSupabase()
+      ? participantSupabase.leaderboard(competitionId)
+      : request<LeaderboardResponse>(`/leaderboard/${competitionId}`),
 
   adminLogin: (username: string, password: string) =>
     request<AdminLoginResponse>(
@@ -159,12 +180,19 @@ export const api = {
       batch_size?: number
       concurrency?: number
       max_retries?: number
+      mode?: 'restart' | 'resume' | 'retry_failed'
     },
     token?: string,
   ) =>
     request<EvalRunStatus>(
       '/admin/evaluations/start',
       { method: 'POST', body: JSON.stringify(body) },
+      token ?? getAdminToken(),
+    ),
+  adminPauseEval: (token?: string) =>
+    request<EvalRunStatus>(
+      '/admin/evaluations/pause',
+      { method: 'POST', body: JSON.stringify({}) },
       token ?? getAdminToken(),
     ),
   adminEvalRun: (token?: string) =>
@@ -189,7 +217,7 @@ export const api = {
     ),
   adminEvalLogs: (since = 0, token?: string) =>
     request<{ logs: EvalLogEntry[]; run: EvalRunStatus }>(
-      `/admin/evaluations/logs?since=${since}`,
+      `/admin/evaluations/logs?since=${since}&limit=200`,
       {},
       token ?? getAdminToken(),
     ),

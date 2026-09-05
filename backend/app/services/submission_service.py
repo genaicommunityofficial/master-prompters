@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Callable
 
 from app.db import db as _db_instance
 from app.services import competition_service as comp_svc
@@ -59,7 +58,7 @@ def job_payloads_for_responses(responses: list[dict]) -> list[dict]:
                 "response_id": response_id,
                 "status": "QUEUED",
                 "provider": "gemini",
-                "model": "gemini-2.5-flash",
+                "model": gemini_model_name(),
                 "queued_at": "now()",
             }
         )
@@ -230,6 +229,14 @@ def _refresh_submission_state(sub: dict, participant_id: str) -> dict:
     return sub
 
 
+def gemini_model_name() -> str:
+    """Model id sent to the Gemini API. Override with GEMINI_MODEL."""
+    from app.config import settings
+
+    name = str(getattr(settings, "gemini_model", "") or "").strip()
+    return name or "gemini-3.6-flash"
+
+
 def ensure_gemini_configured() -> None:
     """Raises EvalConfigError unless a real Gemini API key is configured."""
     from app.config import settings
@@ -253,6 +260,7 @@ def run_evaluator(
         question=question,
         evaluation_config=evaluation_config,
         criteria_md=criteria_md,
+        concurrency=1,
     )
     return results[0]
 
@@ -262,110 +270,161 @@ def run_batch_evaluator(
     question: dict,
     evaluation_config: dict,
     criteria_md: str | None = None,
+    concurrency: int = 8,
 ) -> list[dict]:
-    """Evaluate a batch of prompts that share the same question and criteria.
+    """Score each prompt independently, with parallel Gemini HTTP calls.
 
-    Each item must contain at least ``prompt_text``. Returns a list of result
-    dicts in the same order as *items*. Always uses the real Gemini API.
+    Sharing one request across many prompts mixed scores and failed JSON parses.
+    One prompt per call keeps rubric judgments independent; concurrency cuts
+    wall-clock time. Database writes stay on the caller thread.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     ensure_gemini_configured()
     if criteria_md:
         evaluation_config = {**(evaluation_config or {}), "criteria_md": criteria_md}
-    return _gemini_batch_evaluate(items, question, evaluation_config)
+    if not items:
+        return []
+    workers = max(1, min(int(concurrency), len(items)))
+    if workers == 1 or len(items) == 1:
+        return [_gemini_evaluate_one(item, question, evaluation_config) for item in items]
+
+    results: list[dict | None] = [None] * len(items)
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gemini-eval") as pool:
+        futures = {
+            pool.submit(_gemini_evaluate_one, item, question, evaluation_config): i
+            for i, item in enumerate(items)
+        }
+        for fut in as_completed(futures):
+            results[futures[fut]] = fut.result()
+    missing = [i for i, row in enumerate(results) if row is None]
+    if missing:
+        raise RuntimeError(f"Gemini returned no result for prompts {missing}")
+    return results  # type: ignore[return-value]
 
 
-def _gemini_batch_evaluate(
-    items: list[dict],
+def _is_retryable_gemini_error(exc: Exception) -> bool:
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    tokens = (
+        "429",
+        "resource exhausted",
+        "resourceexhausted",
+        "unavailable",
+        "503",
+        "500",
+        "deadline",
+        "internal",
+        "too many requests",
+        "overloaded",
+    )
+    return name in {
+        "resourceexhausted",
+        "serviceunavailable",
+        "internalservererror",
+        "toomanyrequests",
+        "deadlineexceeded",
+    } or any(tok in msg for tok in tokens)
+
+
+def _gemini_evaluate_one(
+    item: dict,
     question: dict,
     evaluation_config: dict,
-) -> list[dict]:
-    """Send a batch of prompts to Gemini in a single request.
-
-    All prompts share the same question and criteria. The model scores each
-    prompt independently and returns a JSON array of results.
-    """
+) -> dict:
+    """One competition prompt → one Gemini JSON score. Retries transient API errors."""
     import google.generativeai as genai
     from app.config import settings
 
     genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model_name = gemini_model_name()
+    model = genai.GenerativeModel(
+        model_name,
+        generation_config={
+            "temperature": 0,
+            "response_mime_type": "application/json",
+        },
+    )
 
     criteria_md = evaluation_config.get("criteria_md", "")
     question_text = question.get("description") or question.get("title") or ""
-
-    prompt_parts: list[str] = []
-    for i, item in enumerate(items):
-        prompt_parts.append(f"--- PROMPT_{i} ---\n{item['prompt_text']}")
+    prompt_text = item["prompt_text"]
 
     user_content = (
-        f"You are an expert prompt engineer evaluating prompts for a competition.\n\n"
+        "You are an expert prompt engineer evaluating one competition prompt.\n\n"
         f"## Question / Task\n{question_text}\n\n"
     )
     if criteria_md:
         user_content += f"## Evaluation Criteria (Rubric)\n{criteria_md}\n\n"
     user_content += (
-        "## Prompts to Evaluate\n\n"
-        + "\n\n".join(prompt_parts)
-        + "\n\n"
+        f"## Prompt to Evaluate\n{prompt_text}\n\n"
         "## Instructions\n"
-        "Evaluate EACH prompt above independently against the criteria.\n"
-        "Return a JSON array with exactly "
-        f"{len(items)} objects, one per prompt, in the same order.\n"
-        "Each object must have exactly these keys:\n"
+        "Score this prompt independently against the criteria. Do not compare it to other prompts.\n"
+        "Return a JSON object with exactly these keys:\n"
         '  - "score": number 0-100 (overall score)\n'
         '  - "criteria_scores": object with keys matching the rubric dimensions '
         "(e.g. clarity, specificity, creativity, feasibility) — each a number 0-100\n"
-        '  - "summary": string (one sentence explaining the score)\n\n'
-        "Return ONLY the JSON array. No markdown fences, no extra text.\n"
+        '  - "summary": string (one sentence explaining the score)\n'
+        "Return ONLY the JSON object.\n"
     )
 
-    t0 = time.monotonic()
-    response = model.generate_content(user_content)
-    latency_ms = int((time.monotonic() - t0) * 1000)
-
-    raw = response.text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
-    parsed = json.loads(raw)
-    if not isinstance(parsed, list) or len(parsed) != len(items):
-        raise ValueError(
-            f"Gemini returned {len(parsed) if isinstance(parsed, list) else '?'} "
-            f"results for {len(items)} prompts"
-        )
+    last_exc: Exception | None = None
+    raw = ""
+    latency_ms = 0
+    response = None
+    for attempt in range(4):
+        t0 = time.monotonic()
+        try:
+            response = model.generate_content(user_content)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            raw = (response.text or "").strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                if len(parsed) != 1 or not isinstance(parsed[0], dict):
+                    raise ValueError("Gemini returned a JSON array instead of one score object")
+                parsed = parsed[0]
+            if not isinstance(parsed, dict):
+                raise ValueError("Gemini returned JSON that is not an object")
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            retryable = _is_retryable_gemini_error(exc) or isinstance(exc, (json.JSONDecodeError, ValueError))
+            if not retryable or attempt == 3:
+                raise
+            time.sleep(min(8.0, 1.0 * (2**attempt)))
+    else:
+        raise last_exc or RuntimeError("Gemini evaluation failed")
 
     total_input = 0
     total_output = 0
     total_thinking = 0
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
+    if response is not None and hasattr(response, "usage_metadata") and response.usage_metadata:
         um = response.usage_metadata
         total_input = getattr(um, "prompt_token_count", 0) or 0
         total_output = getattr(um, "candidates_token_count", 0) or 0
         total_thinking = getattr(um, "thoughts_token_count", 0) or 0
 
-    per_input = max(1, total_input // len(items))
-    per_output = max(1, total_output // len(items))
-
-    results: list[dict] = []
-    for i, entry in enumerate(parsed):
-        res = {
-            "score": float(entry.get("score", 0)),
-            "criteria_scores": entry.get("criteria_scores", {}),
-            "summary": entry.get("summary", ""),
-            "model": "gemini-2.5-flash",
-            "input_tokens": per_input,
-            "output_tokens": per_output,
-            "thinking_tokens": max(0, total_thinking // len(items)),
-            "latency_ms": latency_ms,
-        }
-        res["estimated_cost_usd"] = estimate_cost_usd(
-            res["model"],
-            res["input_tokens"],
-            res["output_tokens"],
-            res["thinking_tokens"],
-        )
-        results.append(res)
-    return results
+    score = float(parsed.get("score", 0))
+    score = max(0.0, min(100.0, score))
+    res = {
+        "score": score,
+        "criteria_scores": parsed.get("criteria_scores") or {},
+        "summary": parsed.get("summary") or "",
+        "model": model_name,
+        "input_tokens": max(1, int(total_input)),
+        "output_tokens": max(1, int(total_output)),
+        "thinking_tokens": max(0, int(total_thinking)),
+        "latency_ms": latency_ms,
+    }
+    res["estimated_cost_usd"] = estimate_cost_usd(
+        res["model"],
+        res["input_tokens"],
+        res["output_tokens"],
+        res["thinking_tokens"],
+    )
+    return res
 
 
 def get_saved_prompts(participant_id: str, competition_id: str) -> list[dict]:

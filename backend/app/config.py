@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     # Gemini (used by the evaluator; key is server-side only)
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.6-flash"
 
     # Auth / JWT
     jwt_secret: str = "change-me-in-production"

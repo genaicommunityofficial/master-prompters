@@ -8,6 +8,8 @@ from app.db import db
 # lookup table is missing a row for a model.
 _DEFAULT_PRICES: dict[str, dict[str, float]] = {
     "gemini-2.5-flash": {"input": 0.0003, "output": 0.0025, "thinking": 0.0035},
+    # USD per 1K tokens. 3.6 Flash: $1.50 / $7.50 per 1M; thinking billed as output.
+    "gemini-3.6-flash": {"input": 0.0015, "output": 0.0075, "thinking": 0.0075},
 }
 
 _lock = threading.Lock()

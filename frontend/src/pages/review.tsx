@@ -165,13 +165,10 @@ export default function ReviewPage() {
     <PageShell>
       <section className="container py-12 md:py-16">
         <div className="mx-auto max-w-2xl">
-          <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase">
-            Competition · Review
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-balance">Review your prompts</h1>
-          <p className="mt-3 text-muted-foreground">
-            Make any final edits below, then submit. Once submitted, your responses cannot be changed.
-          </p>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              Review
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-balance">Your entries</h1>
 
           {error ? (
             <div className="mt-6 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
@@ -260,7 +257,7 @@ export default function ReviewPage() {
             </Button>
           </div>
           <p className="mt-4 text-center text-xs text-muted-foreground">
-            By submitting you confirm these are your final responses.
+            Final.
           </p>
         </div>
       </section>

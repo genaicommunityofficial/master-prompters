@@ -28,7 +28,7 @@ export function EvalProgressPanel({
   }
   const { totals, jobs, per_category, top_errors, failed_sample, cost, run } = status
   const progressPct = totals.progress_pct ?? 0
-  const running = run?.status === 'running'
+  const running = run?.status === 'running' || run?.status === 'pausing'
   const jobFailed = totals.job_failed ?? jobs.FAILED ?? 0
 
   return (
@@ -104,7 +104,7 @@ export function EvalProgressPanel({
                           <div className="h-full bg-foreground" style={{ width: `${Math.min(100, pct)}%` }} />
                         </div>
                         <div className="mt-2 text-right text-xs tabular-nums text-muted-foreground">
-                          {pct.toFixed(0)}% · avg {c.avg_score ?? '—'}
+                          {pct.toFixed(0)}% · avg {c.avg_score ?? '-'}
                         </div>
                       </div>
                     )

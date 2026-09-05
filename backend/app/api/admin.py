@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
 from pydantic import BaseModel
@@ -78,9 +78,10 @@ TEST_COMPETITION_ID = "competition_test"
 
 class EvalStartRequest(BaseModel):
     competition_id: str | None = None
-    batch_size: int = 8
-    concurrency: int = 4
+    batch_size: int = 16
+    concurrency: int = 8
     max_retries: int = 3
+    mode: Literal["restart", "resume", "retry_failed"] = "restart"
 
 
 def _allowed_eval_competitions(payload: dict) -> set[str]:
@@ -108,9 +109,15 @@ def start_evaluation(
             batch_size=body.batch_size,
             concurrency=body.concurrency,
             max_retries=body.max_retries,
+            mode=body.mode,
         )
     except EvalConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/evaluations/pause")
+def pause_evaluation(payload: dict = Depends(require_admin)) -> dict:
+    return eval_run_service.pause()
 
 
 @router.get("/evaluations/run")

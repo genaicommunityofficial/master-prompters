@@ -1,18 +1,28 @@
 # Prompt Writing Competition Platform
 
-Minimal, durable, asynchronous platform for a prompt-writing competition (Master
-Prompters 2.0). Participants sign in with their registration number, then confirm
-with the event QR code, write five prompts, and submit once. The backend stores
-submissions and enqueues async evaluation jobs; it never waits on the LLM in the
-request path.
+Minimal, durable platform for Master Prompters 2.0. Participants sign in with
+their registration number, confirm with the event QR code, write five prompts,
+and submit once. Evaluation is started later from a local admin app; the
+participant request path never waits on the LLM.
+
+## How it is deployed
+
+- **Participants** — React SPA on **Vercel**, talking **directly** to **Supabase**
+  with the anon key (login, submit, public leaderboard). No FastAPI in this path.
+- **Admin + Gemini eval** — FastAPI on **your laptop**, using the service-role
+  key. Open/close the competition, run evaluation for hours, publish results.
+- After publish, participants reload `/leaderboard` on Vercel.
+
+Never put `SUPABASE_SERVICE_ROLE_KEY` or `GEMINI_API_KEY` in the frontend or on
+Vercel.
 
 ## Stack
 
 - **Frontend** — React + TypeScript + Vite, Tailwind CSS, shadcn/ui + Radix, Motion
-- **Backend** — Python + FastAPI + Pydantic
+- **Backend** — Python + FastAPI + Pydantic (admin + evaluator, local)
 - **Database** — Supabase PostgreSQL (existing schema is reused read-only; new
   `pc_*` tables are additive)
-- **LLM** — Google Gemini (evaluator stub until rubric is supplied)
+- **LLM** — Google Gemini (evaluator; run from the laptop)
 
 ## Repo layout
 
@@ -30,10 +40,9 @@ docs/
 
 ## Quick start
 
-See [docs/SETUP.md](docs/SETUP.md). The one manual prerequisite is:
-paste **`supabase/migrations/0000_full_setup.sql`** into the Supabase SQL editor
-and run it (creates the new `pc_*` tables + seeds the competition). Existing
-tables are untouched.
+See [docs/SETUP.md](docs/SETUP.md). Paste **`supabase/migrations/`** in order
+(`0000` … `0007`) into the Supabase SQL editor. Existing tables are untouched.
+`0005` + `0007` are required before the Vercel participant site can log in or submit.
 
 Then:
 
@@ -58,11 +67,11 @@ number only and is excluded from leaderboards.
 
 ## Security
 
-- `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` are server-side only.
-- RLS on all new tables; the frontend never sees the service-role key.
-- Participant can only read/write their own submission (enforced in backend).
+- `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` are laptop/backend only.
+- RLS on all new tables; the Vercel app only has the anon key and SECURITY
+  DEFINER RPCs (`pc_login_*`, `pc_submit*`, `pc_public_leaderboard`).
 - Admin is a separate username/password login (bcrypt-verified, rate-limited) that
-  mints a `role=admin` JWT; admin ops live under `/admin` with a Live / Test mode switch.
+  mints a `role=admin` JWT; use `/admin` on localhost with a Live / Test mode switch.
 
 ## Testing
 

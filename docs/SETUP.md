@@ -10,7 +10,7 @@
 ## 1. Create the database tables (ONE TIME)
 
 The app needs new tables that **do not modify** the existing schema. Apply every
-file in **`supabase/migrations/`** in order (`0000` … `0003`) by pasting into the
+file in **`supabase/migrations/`** in order (`0000` … `0007`) by pasting into the
 Supabase **SQL Editor**, or run `python scripts/apply_db.py` when `DATABASE_URL`
 is set.
 
@@ -35,6 +35,9 @@ Later additive migrations:
 - `0002_registration_number.sql` — `pc_participants.registration_number`
 - `0003_participant_login_tracking.sql` — `login_count` / `last_login_at`
 - `0004_pipeline_tester.sql` — `pc_participants.is_pipeline_tester`
+- `0005_participant_supabase_rpcs.sql` — anon RPCs for login, submit, public leaderboard
+- `0006_pgcrypto_search_path.sql` — include `extensions` on RPC search_path
+- `0007_session_token_no_pgcrypto.sql` — mint login tokens without `gen_random_bytes` (required after 0005)
 
 It also seeds the **Master Prompters 2.0** competition with the **five real
 categories**, plus an isolated **TEST** competition used by the test suite:
@@ -90,24 +93,43 @@ Backend runs at `http://localhost:8000`.
 
 ```
 cd frontend
-copy .env.example .env   # VITE_API_BASE_URL left empty proxies /api in dev
+copy .env.example .env.local
+```
+
+Fill **only** the public Supabase values (Project Settings → API):
+
+| Variable | Value |
+|---|---|
+| `VITE_SUPABASE_URL` | `https://<project>.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | the **anon** `public` key — never the service-role key |
+| `VITE_API_BASE_URL` | leave empty |
+
+Empty `VITE_API_BASE_URL` is correct:
+
+- **Vite dev** still proxies `/api` to FastAPI for the admin control room.
+- **Vercel** participants talk to Supabase directly; they never call FastAPI.
+
+```
 npm install
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173` and proxies `/api` to the backend.
+Frontend runs at `http://localhost:5173`. Participant login/submit uses the
+Supabase RPCs from migration `0005`. Admin pages still use FastAPI on
+`http://localhost:8000`.
 
 ## 4. Authentication flow
 
-1. Participant signs in at the landing page by **uploading their QR code image**
-   or **pasting the QR message text** (the `GENAI_QR_...` token).
-2. The backend decodes the QR with OpenCV, looks the token up in the **existing
-   `registrations`** table, verifies the registration belongs to the competition's
-   event and is approved.
-3. A participant row is created in `pc_participants` (or reused) and a short-lived
-   JWT session token is returned. The frontend stores it locally.
-4. The participant answers the five questions, reviews, and submits once. The
-   submission is idempotent (a participant can only submit once).
+1. Participant signs in with their **registration number**, then confirms with
+   the event QR (upload or paste `GENAI_QR_...`). Pipeline testers and
+   admin-added numbers skip the QR step.
+2. The browser calls Supabase RPCs (`pc_login_registration`, `pc_login_qr`).
+   Those functions read **`registrations` read-only**, create/reuse a
+   `pc_participants` row, and return a hashed session token (not a JWT).
+3. The frontend stores that token locally and uses it for submit.
+4. The participant answers the five questions and submits once. Submit writes
+   `pc_submissions` + `pc_responses` only — evaluation is started later from
+   the local admin app.
 
 ## 5. Evaluation pipeline
 
@@ -212,10 +234,47 @@ python scripts/e2e_production_test.py --base-url https://<host>/api --mode all
 The runner reads `backend/.env` for Supabase creds and `JWT_SECRET`, mints local
 participant JWTs, and requires `ADMIN_PASSWORD` only for the `admin` mode.
 
-## 9. Deployment (Render)
+## 9. Deployment (Vercel participants + laptop eval)
 
-- Frontend → Render Static Site (build: `npm run build`).
-- Backend → Render Web Service (start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
-- Set env vars above in Render. The backend is stateless and ships no durable
-  background workers; all durable state (jobs, logs, evaluations) lives in
-  Supabase, and the queue is drained via the admin panel's evaluation controls.
+This is the intended production shape for ~300 concurrent participants:
+
+```
+Participants  →  Vercel (static SPA)  →  Supabase (anon key + RPCs)
+You           →  local Vite + FastAPI →  Supabase (service role) → Gemini
+Publish       →  FastAPI sets leaderboard_visible
+Participants  →  reload /leaderboard  →  pc_public_leaderboard RPC
+```
+
+### Vercel (frontend only)
+
+1. New Vite project, **Root Directory** = `frontend`.
+2. Build: `npm run build`. Output: `dist`.
+3. Environment variables (Production + Preview):
+
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+
+   Do **not** set `VITE_API_BASE_URL`. Do **not** add `SUPABASE_SERVICE_ROLE_KEY`
+   or `GEMINI_API_KEY` to Vercel.
+
+4. Apply `0005` then `0007` in the SQL editor before the first login
+   (`0006` is optional if `0007` is applied).
+
+A Vercel HTTPS page cannot call `http://127.0.0.1:8000` (mixed content). Admin
+on the deployed site shows a “run on your laptop” message on purpose.
+
+### Laptop (admin + Gemini)
+
+Keep using local frontend + backend:
+
+```
+cd backend
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173/admin`. Open the live competition, start Gemini eval
+(concurrency **2** on 8 GB RAM), then **Publish leaderboard**. Participants on
+Vercel reload and see ranks. Leave other heavy apps closed during a long eval run.

@@ -10,6 +10,8 @@ import { FullScreenLoader } from '@/components/ui/spinner'
 import { api, ApiError } from '@/services/api'
 import { useSession } from '@/store/session'
 import type { Question } from '@/types'
+import { briefForQuestion } from '@/lib/categories'
+import { COMPETITION_NAME } from '@/lib/brand'
 import { cn, wordCount } from '@/lib/utils'
 
 const DRAFT_KEY = 'pc_draft_v2'
@@ -109,20 +111,12 @@ export default function CompetitionPage() {
 
   return (
     <PageShell>
-      <section className="relative container py-12 md:py-16">
-        {/* Background decoration */}
-        <div className="absolute inset-0 -z-10 dot-grid opacity-20" />
+      <section className="container py-12 md:py-16">
         <div className="mx-auto max-w-2xl">
           <div className="mb-8">
-            <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase">
-              Competition
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-balance">
-              Write your five prompts
+            <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+              {COMPETITION_NAME}
             </h1>
-            <p className="mt-3 text-muted-foreground leading-relaxed">
-              Answer each question with a prompt. You can edit your answers on the review page before submitting.
-            </p>
           </div>
 
           {error ? (
@@ -136,13 +130,11 @@ export default function CompetitionPage() {
               const value = draft[q.id] ?? ''
               const len = value.trim().length
               const met = len >= q.min_length
+              const brief = briefForQuestion(q.title, q.question_number)
               return (
                 <Card
                   key={q.id}
-                  className={cn(
-                    'transition-all duration-300 card-hover animate-fade-in',
-                    met ? 'ring-1 ring-primary/20' : '',
-                  )}
+                  className={cn(met ? 'ring-1 ring-foreground/15' : '')}
                 >
                   <CardContent className="space-y-3 pt-6">
                     <div className="flex items-baseline justify-between gap-3">
@@ -154,7 +146,9 @@ export default function CompetitionPage() {
                         {len} / {q.max_length}
                       </span>
                     </div>
-                    {q.description ? (
+                    {brief ? (
+                      <p className="text-sm leading-relaxed text-muted-foreground">{brief}</p>
+                    ) : q.description ? (
                       <p className="text-sm text-muted-foreground">{q.description}</p>
                     ) : null}
                     <Textarea
@@ -162,7 +156,7 @@ export default function CompetitionPage() {
                       value={value}
                       rows={6}
                       maxLength={q.max_length}
-                      placeholder={`Your prompt for ${q.title}…`}
+                      placeholder=""
                       onChange={(e) => setAnswer(q.id, e.target.value)}
                     />
                     <div className="flex items-center justify-between text-xs">
@@ -192,14 +186,9 @@ export default function CompetitionPage() {
               onClick={() => nav('/competition/review')}
               disabled={!allValid}
             >
-              Review & submit <ArrowRight className="ml-1" />
+              Continue <ArrowRight className="ml-1" />
             </Button>
           </div>
-          {!allValid ? (
-            <p className="mt-3 text-center text-xs text-muted-foreground">
-              Complete all five prompts (minimum length each) to continue.
-            </p>
-          ) : null}
         </div>
       </section>
     </PageShell>

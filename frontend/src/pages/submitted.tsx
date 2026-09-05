@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { CheckCircle2 } from 'lucide-react'
 import { PageShell } from '@/components/layout'
 import { Button } from '@/components/ui/button'
@@ -6,9 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { useSession } from '@/store/session'
 
 export default function SubmittedPage() {
-  const location = useLocation()
   const name = useSession((s) => s.displayName)
-  const message = (location.state as { message?: string } | null)?.message
 
   return (
     <PageShell>
@@ -19,21 +17,17 @@ export default function SubmittedPage() {
               <CheckCircle2 className="h-8 w-8" />
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-balance">
-              Your responses have been received
+              Received
             </h1>
             <p className="text-muted-foreground leading-relaxed">
-              {name ? `Thank you, ${name}. ` : ''}
-              {message ?? 'Your responses have been saved. Scoring starts when an administrator runs evaluation.'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              You can check the leaderboard once results are published.
+              {name ? `${name}.` : 'Thank you.'}
             </p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <Button asChild variant="outline" className="sm:w-auto w-full">
-                <Link to="/leaderboard">View leaderboard</Link>
+                <Link to="/leaderboard">Results</Link>
               </Button>
               <Button asChild className="sm:w-auto w-full">
-                <Link to="/">Back to home</Link>
+                <Link to="/">Home</Link>
               </Button>
             </div>
           </CardContent>

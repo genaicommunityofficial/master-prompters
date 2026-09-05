@@ -1,11 +1,29 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useState, type ReactNode } from 'react'
 import { Menu, X } from 'lucide-react'
+import { ClubMark } from '@/components/club-mark'
 import { Button } from '@/components/ui/button'
+import { COMMUNITY_LINE, COMPETITION_NAME } from '@/lib/brand'
 import { useSession } from '@/store/session'
 import { adminNavLinks, participantNavLinks } from '@/lib/nav'
 import { clearSession, getToken } from '@/services/api'
 import { cn } from '@/lib/utils'
+
+function BrandLockup({ to }: { to: string }) {
+  return (
+    <Link to={to} className="flex min-w-0 items-center gap-2.5">
+      <ClubMark size={32} className="h-8 w-8" decorative />
+      <span className="min-w-0">
+        <span className="block truncate text-[13px] font-medium leading-tight">
+          {COMPETITION_NAME}
+        </span>
+        <span className="mt-0.5 hidden truncate text-[11px] text-muted-foreground sm:block">
+          {COMMUNITY_LINE}
+        </span>
+      </span>
+    </Link>
+  )
+}
 
 function HeaderFrame({
   className,
@@ -26,13 +44,8 @@ function HeaderFrame({
         className,
       )}
     >
-      <div className="container flex h-16 items-center justify-between">
-        <Link to={brandTo} className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold">
-            Mp
-          </span>
-          <span>Master Prompters 2.0</span>
-        </Link>
+      <div className="container flex min-h-16 items-center justify-between gap-4 py-2">
+        <BrandLockup to={brandTo} />
 
         <nav className="hidden items-center justify-end gap-1 md:flex" aria-label="Primary">
           {links.map((l) => (
@@ -116,31 +129,37 @@ function TestModeSwitch({
   onChange: (next: boolean) => void
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className={cn('text-xs', testMode ? 'text-muted-foreground' : 'font-medium text-foreground')}>
-        Live
-      </span>
+    <div
+      role="group"
+      aria-label="Competition scope"
+      className="inline-flex rounded-md border border-border bg-muted p-0.5"
+    >
       <button
         type="button"
-        role="switch"
-        aria-checked={testMode}
-        aria-label="Test mode"
-        onClick={() => onChange(!testMode)}
+        aria-pressed={!testMode}
+        onClick={() => onChange(false)}
         className={cn(
-          'relative h-6 w-11 rounded-full transition-colors',
-          testMode ? 'bg-foreground' : 'bg-muted',
+          'rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors',
+          testMode
+            ? 'text-muted-foreground hover:text-foreground'
+            : 'bg-background text-foreground shadow-sm',
         )}
       >
-        <span
-          className={cn(
-            'absolute top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform',
-            testMode ? 'translate-x-5' : 'translate-x-0.5',
-          )}
-        />
+        Live
       </button>
-      <span className={cn('text-xs', testMode ? 'font-medium text-foreground' : 'text-muted-foreground')}>
+      <button
+        type="button"
+        aria-pressed={testMode}
+        onClick={() => onChange(true)}
+        className={cn(
+          'rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors',
+          testMode
+            ? 'bg-background text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground',
+        )}
+      >
         Test
-      </span>
+      </button>
     </div>
   )
 }
@@ -169,12 +188,7 @@ export function AdminHeader({
       )}
     >
       <div className="container flex min-h-14 items-center justify-between gap-4 py-2.5">
-        <Link to="/admin" className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold">
-            Mp
-          </span>
-          <span>Master Prompters 2.0</span>
-        </Link>
+        <BrandLockup to="/admin" />
         <div className="hidden items-center gap-4 md:flex">
           {signedIn && onTestModeChange ? (
             <TestModeSwitch testMode={testMode} onChange={onTestModeChange} />
@@ -264,8 +278,9 @@ function Shell({
         {children}
       </main>
       <footer className="border-t border-border/60 py-8">
-        <div className="container text-sm text-muted-foreground">
-          Master Prompters 2.0 · Prompt Writing Competition
+        <div className="container flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:items-baseline sm:justify-between">
+          <p>{COMPETITION_NAME}</p>
+          <p>Organised by the {COMMUNITY_LINE}</p>
         </div>
       </footer>
     </div>

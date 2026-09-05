@@ -48,9 +48,10 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
-        display: ['Outfit', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+        sans: ['IBM Plex Sans', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+        display: ['IBM Plex Sans', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        pixel: ['Doto', 'IBM Plex Sans', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['IBM Plex Sans', 'ui-monospace', 'monospace'],
       },
       keyframes: {
         'accordion-down': {
@@ -81,9 +82,9 @@ export default {
           '0%, 100%': { transform: 'translateY(0px)' },
           '50%': { transform: 'translateY(-10px)' },
         },
-        'gradient-shift': {
-          '0%, 100%': { backgroundPosition: '0% 50%' },
-          '50%': { backgroundPosition: '100% 50%' },
+        'caret': {
+          '0%, 49%': { opacity: '1' },
+          '50%, 100%': { opacity: '0' },
         },
       },
       animation: {
@@ -94,7 +95,7 @@ export default {
         'slide-in-right': 'slide-in-right 0.5s ease-out forwards',
         'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
         'float': 'float 3s ease-in-out infinite',
-        'gradient-shift': 'gradient-shift 3s ease infinite',
+        'caret': 'caret 1.05s steps(1, end) infinite',
       },
       backgroundImage: {
         'dot-pattern': 'radial-gradient(circle, hsl(var(--muted-foreground) / 0.3) 1px, transparent 1px)',

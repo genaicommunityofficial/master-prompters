@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { QrCode, ScanLine, KeyRound, ArrowLeft } from 'lucide-react'
+import { ScanLine, KeyRound, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -109,13 +109,9 @@ export default function QrLogin({ competitionId }: { competitionId: string }) {
   return (
     <Card id="participant-signin" className="w-full max-w-md border-border shadow-sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <QrCode className="h-5 w-5" /> Participant sign in
-        </CardTitle>
+        <CardTitle>Enter</CardTitle>
         <CardDescription>
-          {step === 'reg'
-            ? 'Enter the registration number from your event registration.'
-            : `Confirm with the QR code for ${regNumber.trim()}.`}
+          {step === 'reg' ? 'Registration number' : regNumber.trim()}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">

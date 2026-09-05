@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
+from typing import Any
 
 from app.db import db
 from app.services import submission_service
@@ -221,7 +223,15 @@ def _fail_job(job_id: str, error: str) -> None:
     )
 
 
+def _is_permanent_failure(error: str) -> bool:
+    msg = (error or "").lower()
+    return "no longer available" in msg or ("404" in msg and "model" in msg)
+
+
 def _fail_or_retry(job_id: str, error: str, attempt_count: int) -> None:
+    if _is_permanent_failure(error):
+        _fail_job(job_id, error)
+        return
     if attempt_count < MAX_ATTEMPTS:
         (
             db()
@@ -402,15 +412,16 @@ def _recompute_ranks(competition_id: str) -> None:
 def process_queued_batch(
     limit: int = 10,
     competition_id: str | None = None,
+    concurrency: int = 8,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> int:
-    """Process up to *limit* QUEUED jobs, batching by question/criteria.
+    """Claim up to *limit* QUEUED jobs and score them with parallel Gemini calls.
 
-    Jobs sharing the same ``question_id`` are grouped and sent to the LLM in
-    a single request, drastically reducing wall-clock time when many prompts
-    need evaluation. Uses the real Gemini LLM only.
-    When ``competition_id`` is given only jobs whose responses belong to that
-    competition are processed (prevents cross-competition contamination).
+    Each prompt is one API request (independent rubric judgment). Several
+    requests run at once. Supabase writes stay on this thread.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     if competition_id:
         jobs = get_queued_job_ids_for_competition(competition_id, limit)
     else:
@@ -418,7 +429,6 @@ def process_queued_batch(
     if not jobs:
         return 0
 
-    # --- Fetch full job rows so we can group by question_id ----------------
     rows = (
         db()
         .table("pc_evaluation_jobs")
@@ -431,7 +441,6 @@ def process_queued_batch(
     if not rows:
         return 0
 
-    # --- Resolve response → question mapping in bulk ----------------------
     response_ids = [r["response_id"] for r in rows]
     resp_rows = (
         db()
@@ -444,8 +453,7 @@ def process_queued_batch(
     )
     resp_map = {r["id"]: r for r in resp_rows}
 
-    # --- Group job rows by question_id ------------------------------------
-    groups: dict[str, list[tuple[dict, dict]]] = defaultdict(list)  # question_id → [(job, response)]
+    groups: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
     for row in rows:
         resp = resp_map.get(row["response_id"])
         if not resp:
@@ -453,20 +461,72 @@ def process_queued_batch(
         qid = resp.get("question_id", "unknown")
         groups[qid].append((row, resp))
 
-    processed = 0
+    work: list[tuple[dict, dict, dict, str | None]] = []
     for question_id, group in groups.items():
-        processed += _process_batch_group(question_id, group)
-    return processed
+        prepared = _prepare_group(question_id, group)
+        work.extend(prepared)
+
+    if not work:
+        return 0
+
+    workers = max(1, min(int(concurrency), len(work)))
+    outcomes: list[tuple[dict, dict, dict, dict | None, str | None]] = []
+
+    def _score(item: tuple[dict, dict, dict, str | None]) -> dict:
+        _job, resp, question, criteria_md = item
+        return submission_service.run_evaluator(
+            resp["prompt_text"],
+            question,
+            {},
+            criteria_md=criteria_md,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gemini-eval") as pool:
+        futures = {pool.submit(_score, item): item for item in work}
+        for fut in as_completed(futures):
+            job_row, resp, question, _crit = futures[fut]
+            try:
+                outcomes.append((job_row, resp, question, fut.result(), None))
+            except Exception as exc:  # noqa: BLE001
+                outcomes.append((job_row, resp, question, None, str(exc)))
+
+    saved = 0
+    for job_row, resp, question, result, error in outcomes:
+        title = str(question.get("title") or "").strip() or f"Q{question.get('question_number', '?')}"
+        qnum = question.get("question_number")
+        if error or result is None:
+            _fail_or_retry(job_row["id"], error or "evaluation failed", int(job_row.get("attempt_count") or 1))
+            if on_progress:
+                on_progress(
+                    {
+                        "ok": False,
+                        "title": title,
+                        "question_number": qnum,
+                        "error": (error or "evaluation failed")[:240],
+                    }
+                )
+            continue
+        _save_evaluation(job_row, resp, result)
+        saved += 1
+        if on_progress:
+            on_progress(
+                {
+                    "ok": True,
+                    "title": title,
+                    "question_number": qnum,
+                    "score": result.get("score"),
+                }
+            )
+    return saved
 
 
-def _process_batch_group(
+def _prepare_group(
     question_id: str,
     group: list[tuple[dict, dict]],
-) -> int:
-    """Evaluate a batch of prompts that share the same question_id."""
+) -> list[tuple[dict, dict, dict, str | None]]:
+    """Claim jobs and attach question + rubric. No LLM calls."""
     from app.services import eval_criteria_service as crit
 
-    # --- Fetch question once for the whole group --------------------------
     q_rows = (
         db()
         .table("pc_questions")
@@ -478,57 +538,18 @@ def _process_batch_group(
         or []
     )
     question = q_rows[0] if q_rows else {}
-
-    # --- Determine competition_id for criteria lookup ---------------------
     first_resp = group[0][1]
     comp_id = _competition_id_for_response(first_resp)
     criteria_map = crit.get_criteria_map_for_eval(comp_id) if comp_id else {}
     qnum = question.get("question_number")
     criteria_md = criteria_map.get(qnum) if qnum else None
 
-    # --- Claim all jobs in the group (mark PROCESSING) -------------------
-    claimed: list[tuple[dict, dict]] = []
+    prepared: list[tuple[dict, dict, dict, str | None]] = []
     for job_row, resp in group:
         claimed_job = _claim_job(job_row["id"])
         if claimed_job:
-            claimed.append((claimed_job, resp))
-
-    if not claimed:
-        return 0
-
-    # --- Build items list for batch eval ----------------------------------
-    items = [{"prompt_text": resp["prompt_text"]} for _, resp in claimed]
-    evaluation_config = {}
-
-    # --- Call batch evaluator (single LLM request for the whole group) ----
-    try:
-        results = submission_service.run_batch_evaluator(
-            items,
-            question,
-            evaluation_config,
-            criteria_md=criteria_md,
-        )
-    except Exception as exc:
-        for job_row, _ in claimed:
-            _fail_or_retry(job_row["id"], str(exc), int(job_row.get("attempt_count") or 1))
-        return 0
-
-    if len(results) != len(claimed):
-        # Evaluator returned a mismatched batch; requeue so nothing is left
-        # stuck in PROCESSING.
-        for job_row, _ in claimed:
-            _fail_or_retry(
-                job_row["id"],
-                f"evaluator returned {len(results)} results for {len(claimed)} prompts",
-                int(job_row.get("attempt_count") or 1),
-            )
-        return 0
-
-    # --- Persist each result ----------------------------------------------
-    for (job_row, resp), result in zip(claimed, results):
-        _save_evaluation(job_row, resp, result)
-
-    return len(claimed)
+            prepared.append((claimed_job, resp, question, criteria_md))
+    return prepared
 
 
 def _save_evaluation(job_row: dict, resp: dict, result: dict) -> None:

@@ -142,7 +142,7 @@ export default function CriteriaPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between text-base">
-              <span>Category {preview.category} — criteria preview</span>
+              <span>Category {preview.category}: criteria preview</span>
               <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
                 <X className="h-4 w-4" /> Close
               </Button>

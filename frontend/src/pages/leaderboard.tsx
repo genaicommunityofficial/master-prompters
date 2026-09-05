@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { FullScreenLoader } from '@/components/ui/spinner'
 import { api } from '@/services/api'
 import type { LeaderboardResponse } from '@/types'
+import { COMPETITION_NAME } from '@/lib/brand'
 import { cn } from '@/lib/utils'
 
 export default function LeaderboardPage() {
@@ -44,10 +45,10 @@ export default function LeaderboardPage() {
     <PageShell>
       <section className="container py-12 md:py-16">
         <div className="mx-auto max-w-2xl">
-          <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase">
-            Public
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            {COMPETITION_NAME}
           </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Leaderboard</h1>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Results</h1>
 
           {error ? (
             <div className="mt-8 rounded-xl border border-destructive/30 bg-destructive/5 p-10 text-center">
@@ -55,16 +56,12 @@ export default function LeaderboardPage() {
             </div>
           ) : !visible ? (
             <div className="mt-8 rounded-xl border border-border bg-muted/40 p-10 text-center">
-              <p className="text-lg font-medium">Results will be published later</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                The leaderboard is currently hidden.
-              </p>
+              <p className="text-lg font-medium">Not published yet</p>
             </div>
           ) : (
             <>
               <p className="mt-3 text-muted-foreground">
-                Rankings are shown only for fully evaluated submissions. Category columns
-                show the score for each of the five competition areas.
+                Fully scored entries.
               </p>
               <Card className="mt-8">
                 <CardContent className="p-0">
@@ -99,14 +96,14 @@ export default function LeaderboardPage() {
                                 key={q}
                                 className="px-3 py-3.5 text-right tabular-nums text-muted-foreground"
                               >
-                                {e.category_scores?.[q] ?? '—'}
+                                {e.category_scores?.[q] ?? '-'}
                               </td>
                             ))}
                             <td className="px-5 py-3.5 text-right font-semibold tabular-nums">
                               {e.total_score}
                             </td>
                             <td className="px-5 py-3.5 text-right tabular-nums">
-                              {e.average_score ?? '—'}
+                              {e.average_score ?? '-'}
                             </td>
                           </tr>
                         ))}

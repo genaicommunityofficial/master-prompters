@@ -3,8 +3,8 @@ export type SiteLink = { label: string; to: string }
 /** Public and participant chrome. Admin is never listed here. */
 export function participantNavLinks(): SiteLink[] {
   return [
-    { label: 'Competition', to: '/competition' },
-    { label: 'Leaderboard', to: '/leaderboard' },
+    { label: 'Enter', to: '/competition' },
+    { label: 'Results', to: '/leaderboard' },
   ]
 }
 

@@ -144,6 +144,7 @@ export default function ParticipantsPage() {
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase text-muted-foreground">
                   <tr className="border-b border-border">
+                    <th className="w-14 px-5 py-3 font-medium">S.No.</th>
                     <th className="px-5 py-3 font-medium">Name</th>
                     <th className="px-5 py-3 font-medium">Reg. no.</th>
                     <th className="px-5 py-3 font-medium">Source</th>
@@ -152,10 +153,11 @@ export default function ParticipantsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {roster.participants.map((row) => (
+                  {roster.participants.map((row, index) => (
                     <tr key={row.id} className="border-b border-border/60 last:border-0">
-                      <td className="px-5 py-3">{row.display_name ?? '—'}</td>
-                      <td className="px-5 py-3 tabular-nums">{row.registration_number ?? '—'}</td>
+                      <td className="px-5 py-3 tabular-nums text-muted-foreground">{index + 1}</td>
+                      <td className="px-5 py-3">{row.display_name ?? '-'}</td>
+                      <td className="px-5 py-3 tabular-nums">{row.registration_number ?? '-'}</td>
                       <td className="px-5 py-3 capitalize text-muted-foreground">{row.source}</td>
                       {showLogin ? (
                         <td className="px-5 py-3">

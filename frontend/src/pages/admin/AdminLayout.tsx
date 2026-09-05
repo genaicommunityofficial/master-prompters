@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { isAdminApiAvailable } from '@/lib/runtime'
 import {
   api,
   clearAdminSession,
@@ -58,6 +59,33 @@ export function AdminLayout() {
   const outlet: AdminOutletContext | null = token
     ? { token, competitionId, testMode }
     : null
+
+  if (!isAdminApiAvailable()) {
+    return (
+      <AdminShell signedIn={false} onSignOut={handleLogout}>
+        <section className="container flex min-h-[55vh] items-center justify-center py-16">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5" /> Admin runs on your laptop
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>
+                This Vercel site is for participants only. Open and close the competition,
+                run Gemini evaluation, and publish the leaderboard from the local app:
+              </p>
+              <p className="font-mono text-foreground">http://localhost:5173/admin</p>
+              <p>
+                Start FastAPI on this machine first, then reload the leaderboard page here
+                after you publish results.
+              </p>
+            </CardContent>
+          </Card>
+        </section>
+      </AdminShell>
+    )
+  }
 
   if (!token) {
     return (

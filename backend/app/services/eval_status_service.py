@@ -205,7 +205,13 @@ def get_eval_progress(competition_id: str) -> dict[str, Any]:
     # --- Active run snapshot (rate + ETA when running this competition) -----
     run = run_svc.get_status()
     run_info: dict[str, Any] | None = None
-    if run.get("competition_id") == competition_id and run.get("status") in ("running", "completed", "failed"):
+    if run.get("competition_id") == competition_id and run.get("status") in (
+        "running",
+        "pausing",
+        "paused",
+        "completed",
+        "failed",
+    ):
         run_info = {
             "status": run.get("status"),
             "accepted": run.get("accepted"),
