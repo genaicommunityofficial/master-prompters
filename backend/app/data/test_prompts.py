@@ -4,7 +4,7 @@ These prompts are authored offline by the codegen harness (no runtime LLM / API
 key required). Each category has a set of rich skeletons containing ``{slot}``
 placeholders. The population script expands them with seeded topic/audience/tone
 choices so that ``participant_count x 5`` prompts are produced, each unique and
-fitted to the live 20–500 character window.
+fitted to the live 20–2000 character window.
 """
 
 from __future__ import annotations
@@ -505,7 +505,7 @@ FILL_INS: dict[str, list[str]] = {
 
 
 PROMPT_MIN_CHARS = 20
-PROMPT_MAX_CHARS = 500
+PROMPT_MAX_CHARS = 2000
 
 
 def fit_prompt_char_limit(
@@ -529,7 +529,7 @@ def dataset_prompts_for_category(
     target_words: int = 80,
     seed_offset: int = 0,
 ) -> list[str]:
-    """Expand authored skeletons into *count* unique prompts, then fit 20–500 characters.
+    """Expand authored skeletons into *count* unique prompts, then fit 20–2000 characters.
 
     Combinatorial variety comes from (participant, count, category)-seeded
     selection of skeleton + fill-ins + elaborations.

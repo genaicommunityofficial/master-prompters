@@ -17,7 +17,7 @@ class TestPromptGeneration:
         )
         assert len(prompts) == 5
         for p in prompts:
-            assert 20 <= len(p) <= 500, f"Expected 20–500 characters, got {len(p)}"
+            assert 20 <= len(p) <= 2000, f"Expected 20–2000 characters, got {len(p)}"
 
     def test_prompts_differ_per_category(self):
         p1 = ts.generate_prompts_for_category(1, "Meme", "Meme desc", count=2, target_words=80)

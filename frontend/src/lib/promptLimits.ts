@@ -1,6 +1,6 @@
 /** Per-prompt character limits. Enforced in the form, API, and submit RPCs. */
 export const PROMPT_MIN_CHARS = 20
-export const PROMPT_MAX_CHARS = 500
+export const PROMPT_MAX_CHARS = 2000
 
 export function promptLimitCopy(min = PROMPT_MIN_CHARS, max = PROMPT_MAX_CHARS): string {
   return `${min}–${max} characters`

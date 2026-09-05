@@ -1,7 +1,7 @@
 """Seed the TEST competition with realistic prompts for evaluation testing.
 
 Uses the authored dataset from ``app.data.test_prompts`` to generate
-unique prompts per participant/category, fitted to 20–500 characters.
+unique prompts per participant/category, fitted to 20–2000 characters.
 """
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def seed_test_data(participant_count: int = 50) -> dict[str, Any]:
     """Seed the TEST competition with realistic test data.
 
     Creates *participant_count* participants, each with a submission containing
-    5 responses (one per category). Prompts fit the 20–500 character window
+    5 responses (one per category). Prompts fit the 20–2000 character window
     and are unique per participant/category combination.
     """
     store = db()

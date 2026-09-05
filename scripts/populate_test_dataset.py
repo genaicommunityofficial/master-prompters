@@ -43,7 +43,7 @@ def main() -> int:
     parser.add_argument("--total", type=int, default=300, help="Number of participants (prompts x5).")
     parser.add_argument("--append", action="store_true", help="Append instead of replacing TEST data.")
     parser.add_argument("--dry-run", action="store_true", help="Print counts without writing.")
-    parser.add_argument("--target-words", type=int, default=80, help="Word target before fitting to 20–500 characters.")
+    parser.add_argument("--target-words", type=int, default=80, help="Word target before fitting to 20–2000 characters.")
     args = parser.parse_args()
 
     if args.total < 1 or args.total > 2000:
