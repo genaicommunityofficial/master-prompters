@@ -9,27 +9,32 @@ export const CATEGORIES: CategoryBrief[] = [
   {
     n: 1,
     title: 'Meme Generation',
-    brief: 'The joke, the frame, the punch.',
+    brief:
+      'Write a prompt that would produce an original, shareable meme. Name the joke, the visual setup or template, the on-screen text, the tone, and the audience. It should read instantly on a phone and stay funny on a second look.',
   },
   {
     n: 2,
     title: 'AI Visual Art Creation',
-    brief: 'Subject, light, medium.',
+    brief:
+      'Direct an image model as if you were briefing an illustrator. Specify subject, composition, lighting, palette, medium, and mood in enough detail that two people would picture the same artwork.',
   },
   {
     n: 3,
     title: 'AI Digital Storytelling / Creative Writing',
-    brief: 'Character, place, voice.',
+    brief:
+      'Write a prompt for a short story or scene. Include character, setting, conflict, narrative voice, and how it should end. Name the genre, approximate length, and any language or point-of-view constraints.',
   },
   {
     n: 4,
     title: 'AI Song Factory',
-    brief: 'Genre, mood, lyric.',
+    brief:
+      'Write a prompt for an original song. Specify genre, mood or tempo, song structure (verse, chorus, bridge), vocal character, and the feeling the track should leave. Include a line of lyric direction if it helps.',
   },
   {
     n: 5,
     title: 'AI-Generated Poetry in Local Languages',
-    brief: 'Language, form, image.',
+    brief:
+      'Write a prompt for a poem in an Indian or regional language you name clearly. Specify the form (free verse, ghazal, haiku, and so on), the central images, and what the poem should mean.',
   },
 ]
 

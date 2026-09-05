@@ -56,7 +56,7 @@ function toQuestion(row: QuestionRow) {
     question_number: number,
     title: row.title || `Question ${number}`,
     description: row.description,
-    max_length: row.max_length ?? 2000,
+    max_length: row.max_length ?? 500,
     min_length: row.min_length ?? 20,
   }
 }

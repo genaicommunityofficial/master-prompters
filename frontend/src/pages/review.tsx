@@ -8,6 +8,12 @@ import { Spinner, FullScreenLoader } from '@/components/ui/spinner'
 import { api } from '@/services/api'
 import { useSession } from '@/store/session'
 import type { Question } from '@/types'
+import { briefForQuestion } from '@/lib/categories'
+import {
+  isWithinPromptLimits,
+  promptCharCount,
+  promptLimitCopy,
+} from '@/lib/promptLimits'
 import { cn, wordCount } from '@/lib/utils'
 
 const DRAFT_KEY = 'pc_draft_v2'
@@ -67,14 +73,21 @@ export default function ReviewPage() {
   }
 
   const allReady = useMemo(
-    () => questions.length === 5 && questions.every((q) => (draft[q.id] ?? '').trim().length >= q.min_length),
+    () =>
+      questions.length === 5 &&
+      questions.every((q) => isWithinPromptLimits(draft[q.id] ?? '', q.min_length, q.max_length)),
     [questions, draft],
   )
+
+  const limitsLabel = useMemo(() => {
+    const first = questions[0]
+    return promptLimitCopy(first?.min_length, first?.max_length)
+  }, [questions])
 
   const handleSubmit = async () => {
     if (!competitionId) return
     if (!allReady) {
-      setError('Every prompt must meet its minimum length before submitting.')
+      setError(`Every prompt must be ${limitsLabel} before submitting.`)
       return
     }
 
@@ -169,6 +182,18 @@ export default function ReviewPage() {
               Review
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-balance">Your entries</h1>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              Check each category, then confirm. Submissions are final.
+            </p>
+
+            <div className="mt-6 rounded-lg border border-border bg-muted/30 px-4 py-4">
+              <p className="text-sm font-medium">Submit rules</p>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-muted-foreground">
+                <li>One prompt for each of the five categories.</li>
+                <li>Each prompt must be {limitsLabel} (spaces at the ends are ignored).</li>
+                <li>You cannot edit a prompt after you confirm and submit.</li>
+              </ul>
+            </div>
 
           {error ? (
             <div className="mt-6 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
@@ -201,9 +226,11 @@ export default function ReviewPage() {
           <div className="mt-8 space-y-5">
             {questions.map((q, idx) => {
               const text = draft[q.id] ?? ''
+              const len = promptCharCount(text)
               const isSubmitted = submissionStatus.currentQuestion === q.title
               const isDone = submissionStatus.submitted > idx
-              const tooShort = text.trim().length < q.min_length
+              const inRange = isWithinPromptLimits(text, q.min_length, q.max_length)
+              const brief = briefForQuestion(q.title, q.question_number)
               return (
                 <Card
                   key={q.id}
@@ -221,17 +248,30 @@ export default function ReviewPage() {
                       <div className="flex items-center gap-2">
                         {isSubmitted ? <Spinner className="h-3.5 w-3.5" /> : null}
                         {isDone ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : null}
-                        <span className="text-xs text-muted-foreground">{wordCount(text)} words</span>
+                        <span className="text-xs tabular-nums text-muted-foreground">
+                          {len} / {q.max_length}
+                        </span>
                       </div>
                     </div>
+                    {brief ? (
+                      <p className="mb-3 text-sm leading-relaxed text-muted-foreground">{brief}</p>
+                    ) : q.description ? (
+                      <p className="mb-3 text-sm text-muted-foreground">{q.description}</p>
+                    ) : null}
                     <p className="whitespace-pre-wrap rounded-md bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
                       {text || <span className="italic text-muted-foreground">(empty)</span>}
                     </p>
-                    {tooShort && !isSubmitting ? (
+                    {!inRange && !isSubmitting ? (
                       <p className="mt-2 text-xs text-destructive">
-                        Below minimum length ({q.min_length} chars). Please edit.
+                        {len < q.min_length
+                          ? `Below minimum length (${q.min_length} characters). Please edit.`
+                          : `Over the ${q.max_length} character limit. Please edit.`}
                       </p>
-                    ) : null}
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {wordCount(text)} words · {promptLimitCopy(q.min_length, q.max_length)}
+                      </p>
+                    )}
                     <div className="mt-3 flex justify-end">
                       <Button
                         variant="ghost"
@@ -257,7 +297,7 @@ export default function ReviewPage() {
             </Button>
           </div>
           <p className="mt-4 text-center text-xs text-muted-foreground">
-            Final.
+            Each prompt must be {limitsLabel}. This submission is final.
           </p>
         </div>
       </section>

@@ -37,7 +37,7 @@ create table if not exists public.pc_questions (
   title             text not null,
   description       text,
   input_type        text not null default 'textarea',
-  max_length        int  not null default 2000,
+  max_length        int  not null default 500,
   min_length        int  not null default 20,
   display_order     int  not null default 0,
   evaluation_config jsonb,
@@ -242,23 +242,25 @@ on conflict (id) do nothing;
 -- The five categories.
 insert into public.pc_questions (id, competition_id, question_number, title, description, input_type, max_length, min_length, display_order, evaluation_config) values
   ('q1', 'competition_2026', 1, 'Meme Generation',
-    'Create an original, engaging, and humorous AI-generated meme prompt.', 'textarea', 2000, 20, 1, '{}'::jsonb),
+    'Write a prompt that would produce an original, shareable meme. Name the joke, the visual setup or template, the on-screen text, the tone, and the audience. It should read instantly on a phone and stay funny on a second look.', 'textarea', 500, 20, 1, '{}'::jsonb),
   ('q2', 'competition_2026', 2, 'AI Visual Art Creation',
-    'Transform imagination into compelling AI-generated digital artwork with a detailed prompt.', 'textarea', 2000, 20, 2, '{}'::jsonb),
+    'Direct an image model as if you were briefing an illustrator. Specify subject, composition, lighting, palette, medium, and mood in enough detail that two people would picture the same artwork.', 'textarea', 500, 20, 2, '{}'::jsonb),
   ('q3', 'competition_2026', 3, 'AI Digital Storytelling / Creative Writing',
-    'Generate an engaging story or creative written piece using Generative AI.', 'textarea', 2000, 20, 3, '{}'::jsonb),
+    'Write a prompt for a short story or scene. Include character, setting, conflict, narrative voice, and how it should end. Name the genre, approximate length, and any language or point-of-view constraints.', 'textarea', 500, 20, 3, '{}'::jsonb),
   ('q4', 'competition_2026', 4, 'AI Song Factory',
-    'Create an original AI-generated song using creative prompting techniques.', 'textarea', 2000, 20, 4, '{}'::jsonb),
+    'Write a prompt for an original song. Specify genre, mood or tempo, song structure (verse, chorus, bridge), vocal character, and the feeling the track should leave. Include a line of lyric direction if it helps.', 'textarea', 500, 20, 4, '{}'::jsonb),
   ('q5', 'competition_2026', 5, 'AI-Generated Poetry in Local Languages',
-    'Generate meaningful poetry in any Indian or regional language using AI.', 'textarea', 2000, 20, 5, '{}'::jsonb),
-  ('tq1', 'competition_test', 1, 'Prompt 1', 'Test category one.', 'textarea', 2000, 20, 1, '{}'::jsonb),
-  ('tq2', 'competition_test', 2, 'Prompt 2', 'Test category two.', 'textarea', 2000, 20, 2, '{}'::jsonb),
-  ('tq3', 'competition_test', 3, 'Prompt 3', 'Test category three.', 'textarea', 2000, 20, 3, '{}'::jsonb),
-  ('tq4', 'competition_test', 4, 'Prompt 4', 'Test category four.', 'textarea', 2000, 20, 4, '{}'::jsonb),
-  ('tq5', 'competition_test', 5, 'Prompt 5', 'Test category five.', 'textarea', 2000, 20, 5, '{}'::jsonb)
+    'Write a prompt for a poem in an Indian or regional language you name clearly. Specify the form (free verse, ghazal, haiku, and so on), the central images, and what the poem should mean.', 'textarea', 500, 20, 5, '{}'::jsonb),
+  ('tq1', 'competition_test', 1, 'Prompt 1', 'Test category one.', 'textarea', 500, 20, 1, '{}'::jsonb),
+  ('tq2', 'competition_test', 2, 'Prompt 2', 'Test category two.', 'textarea', 500, 20, 2, '{}'::jsonb),
+  ('tq3', 'competition_test', 3, 'Prompt 3', 'Test category three.', 'textarea', 500, 20, 3, '{}'::jsonb),
+  ('tq4', 'competition_test', 4, 'Prompt 4', 'Test category four.', 'textarea', 500, 20, 4, '{}'::jsonb),
+  ('tq5', 'competition_test', 5, 'Prompt 5', 'Test category five.', 'textarea', 500, 20, 5, '{}'::jsonb)
 on conflict (id) do update set
   title = excluded.title,
-  description = excluded.description;
+  description = excluded.description,
+  max_length = excluded.max_length,
+  min_length = excluded.min_length;
 
 -- ============================================================================
 -- Row Level Security

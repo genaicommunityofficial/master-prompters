@@ -10,7 +10,7 @@
 ## 1. Create the database tables (ONE TIME)
 
 The app needs new tables that **do not modify** the existing schema. Apply every
-file in **`supabase/migrations/`** in order (`0000` … `0007`) by pasting into the
+file in **`supabase/migrations/`** in order (`0000` … `0009`) by pasting into the
 Supabase **SQL Editor**, or run `python scripts/apply_db.py` when `DATABASE_URL`
 is set.
 
@@ -38,6 +38,8 @@ Later additive migrations:
 - `0005_participant_supabase_rpcs.sql` — anon RPCs for login, submit, public leaderboard
 - `0006_pgcrypto_search_path.sql` — include `extensions` on RPC search_path
 - `0007_session_token_no_pgcrypto.sql` — mint login tokens without `gen_random_bytes` (required after 0005)
+- `0008_eval_cost_gemini_36.sql` — seed `gemini-3.6-flash` prices in `pc_evaluation_cost_lookup`
+- `0009_prompt_length_500.sql` — live and TEST questions: 20–500 characters, richer category descriptions
 
 It also seeds the **Master Prompters 2.0** competition with the **five real
 categories**, plus an isolated **TEST** competition used by the test suite:
@@ -47,6 +49,9 @@ categories**, plus an isolated **TEST** competition used by the test suite:
 3. AI Digital Storytelling / Creative Writing
 4. AI Song Factory
 5. AI-Generated Poetry in Local Languages
+
+Each prompt must be **20–500 characters**. Apply `0009` on existing projects so
+the form, submit RPCs, and Gemini eval all see the new limits.
 
 > The evaluation rubric is intentionally left empty. It will be supplied later as
 > a versioned configuration, not hardcoded.

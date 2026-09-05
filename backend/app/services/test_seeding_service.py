@@ -1,7 +1,7 @@
 """Seed the TEST competition with realistic prompts for evaluation testing.
 
 Uses the authored dataset from ``app.data.test_prompts`` to generate
-unique ~500-word prompts per participant/category, seeded deterministically.
+unique prompts per participant/category, fitted to 20–500 characters.
 """
 from __future__ import annotations
 
@@ -9,16 +9,41 @@ import uuid
 from typing import Any
 
 from app.db import db
-from app.data.test_prompts import dataset_prompts_for_category
+from app.data.test_prompts import PROMPT_MAX_CHARS, PROMPT_MIN_CHARS, dataset_prompts_for_category
 
 TEST_COMPETITION_ID = "competition_test"
 
 CATEGORIES = [
-    {"id": "tq1", "number": 1, "title": "Meme Generation", "description": "Create an original, engaging, and humorous AI-generated meme prompt."},
-    {"id": "tq2", "number": 2, "title": "AI Visual Art Creation", "description": "Transform imagination into compelling AI-generated digital artwork with a detailed prompt."},
-    {"id": "tq3", "number": 3, "title": "AI Digital Storytelling / Creative Writing", "description": "Generate an engaging story or creative written piece using Generative AI."},
-    {"id": "tq4", "number": 4, "title": "AI Song Factory", "description": "Create an original AI-generated song using creative prompting techniques."},
-    {"id": "tq5", "number": 5, "title": "AI-Generated Poetry in Local Languages", "description": "Generate meaningful poetry in any Indian or regional language using AI."},
+    {
+        "id": "tq1",
+        "number": 1,
+        "title": "Meme Generation",
+        "description": "Write a prompt that would produce an original, shareable meme. Name the joke, the visual setup or template, the on-screen text, the tone, and the audience. It should read instantly on a phone and stay funny on a second look.",
+    },
+    {
+        "id": "tq2",
+        "number": 2,
+        "title": "AI Visual Art Creation",
+        "description": "Direct an image model as if you were briefing an illustrator. Specify subject, composition, lighting, palette, medium, and mood in enough detail that two people would picture the same artwork.",
+    },
+    {
+        "id": "tq3",
+        "number": 3,
+        "title": "AI Digital Storytelling / Creative Writing",
+        "description": "Write a prompt for a short story or scene. Include character, setting, conflict, narrative voice, and how it should end. Name the genre, approximate length, and any language or point-of-view constraints.",
+    },
+    {
+        "id": "tq4",
+        "number": 4,
+        "title": "AI Song Factory",
+        "description": "Write a prompt for an original song. Specify genre, mood or tempo, song structure (verse, chorus, bridge), vocal character, and the feeling the track should leave. Include a line of lyric direction if it helps.",
+    },
+    {
+        "id": "tq5",
+        "number": 5,
+        "title": "AI-Generated Poetry in Local Languages",
+        "description": "Write a prompt for a poem in an Indian or regional language you name clearly. Specify the form (free verse, ghazal, haiku, and so on), the central images, and what the poem should mean.",
+    },
 ]
 
 
@@ -27,10 +52,10 @@ def generate_prompts_for_category(
     category_title: str,
     category_description: str,
     count: int,
-    target_words: int = 500,
+    target_words: int = 80,
     seed_offset: int = 0,
 ) -> list[str]:
-    """Backward-compatible wrapper around the new authored dataset."""
+    """Backward-compatible wrapper around the authored dataset."""
     return dataset_prompts_for_category(
         category_number, count, target_words, seed_offset
     )
@@ -40,8 +65,8 @@ def seed_test_data(participant_count: int = 50) -> dict[str, Any]:
     """Seed the TEST competition with realistic test data.
 
     Creates *participant_count* participants, each with a submission containing
-    5 responses (one per category). Prompts are ~500 words and unique per
-    participant/category combination.
+    5 responses (one per category). Prompts fit the 20–500 character window
+    and are unique per participant/category combination.
     """
     store = db()
     _ensure_test_competition(store)
@@ -83,7 +108,7 @@ def seed_test_data(participant_count: int = 50) -> dict[str, Any]:
                 category_title=cat["title"],
                 category_description=cat["description"],
                 count=1,
-                target_words=500,
+                target_words=80,
                 seed_offset=pidx * 7919,
             )
             prompt_text = prompts[0]
@@ -122,8 +147,8 @@ def _ensure_test_competition(store) -> None:
             "title": cat["title"],
             "description": cat["description"],
             "input_type": "textarea",
-            "max_length": 2000,
-            "min_length": 20,
+            "max_length": PROMPT_MAX_CHARS,
+            "min_length": PROMPT_MIN_CHARS,
             "display_order": cat["number"],
             "evaluation_config": {},
         }

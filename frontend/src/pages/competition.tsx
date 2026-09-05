@@ -12,6 +12,12 @@ import { useSession } from '@/store/session'
 import type { Question } from '@/types'
 import { briefForQuestion } from '@/lib/categories'
 import { COMPETITION_NAME } from '@/lib/brand'
+import {
+  isWithinPromptLimits,
+  promptCharCount,
+  promptLengthHint,
+  promptLimitCopy,
+} from '@/lib/promptLimits'
 import { cn, wordCount } from '@/lib/utils'
 
 const DRAFT_KEY = 'pc_draft_v2'
@@ -91,16 +97,40 @@ export default function CompetitionPage() {
     window.localStorage.setItem(DRAFT_KEY, JSON.stringify(next))
   }
 
+  useEffect(() => {
+    if (questions.length === 0) return
+    setDraft((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const q of questions) {
+        const value = next[q.id]
+        if (typeof value === 'string' && value.length > q.max_length) {
+          next[q.id] = value.slice(0, q.max_length)
+          changed = true
+        }
+      }
+      if (!changed) return current
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [questions])
+
   const setAnswer = (id: string, value: string) => {
-    persist({ ...draft, [id]: value })
+    const question = questions.find((item) => item.id === id)
+    persist({ ...draft, [id]: question ? value.slice(0, question.max_length) : value })
   }
 
   const allValid = useMemo(
     () =>
       questions.length === 5 &&
-      questions.every((q) => (draft[q.id] ?? '').trim().length >= q.min_length),
+      questions.every((q) => isWithinPromptLimits(draft[q.id] ?? '', q.min_length, q.max_length)),
     [questions, draft],
   )
+
+  const limitsLabel = useMemo(() => {
+    const first = questions[0]
+    return promptLimitCopy(first?.min_length, first?.max_length)
+  }, [questions])
 
   const handleSaveFlash = () => {
     setSavedFlash(true)
@@ -117,6 +147,10 @@ export default function CompetitionPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
               {COMPETITION_NAME}
             </h1>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              Five categories. Each prompt must be {limitsLabel}. Write a complete instruction
+              for that category, then continue to review.
+            </p>
           </div>
 
           {error ? (
@@ -128,8 +162,8 @@ export default function CompetitionPage() {
           <div className="space-y-6">
             {questions.map((q, idx) => {
               const value = draft[q.id] ?? ''
-              const len = value.trim().length
-              const met = len >= q.min_length
+              const len = promptCharCount(value)
+              const met = isWithinPromptLimits(value, q.min_length, q.max_length)
               const brief = briefForQuestion(q.title, q.question_number)
               return (
                 <Card
@@ -167,7 +201,7 @@ export default function CompetitionPage() {
                           met ? 'text-primary' : 'text-muted-foreground',
                         )}
                       >
-                        {met ? 'Ready' : `Minimum ${q.min_length} characters`}
+                        {promptLengthHint(len, q.min_length, q.max_length)}
                       </span>
                     </div>
                   </CardContent>

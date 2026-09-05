@@ -1,11 +1,10 @@
 """Authored test-prompt dataset for seeding the isolated TEST competition.
 
 These prompts are authored offline by the codegen harness (no runtime LLM / API
-key required). Each category has a set of rich ~300-400 word "skeletons"
-containing ``{slot}`` placeholders. The population script expands them with
-seeded topic/audience/tone choices and category-specific elaborations so that
-``participant_count x 5`` prompts are produced, each at least ``target_words``
-long and unique per participant/category.
+key required). Each category has a set of rich skeletons containing ``{slot}``
+placeholders. The population script expands them with seeded topic/audience/tone
+choices so that ``participant_count x 5`` prompts are produced, each unique and
+fitted to the live 20–500 character window.
 """
 
 from __future__ import annotations
@@ -505,13 +504,32 @@ FILL_INS: dict[str, list[str]] = {
 }
 
 
+PROMPT_MIN_CHARS = 20
+PROMPT_MAX_CHARS = 500
+
+
+def fit_prompt_char_limit(
+    text: str,
+    min_len: int = PROMPT_MIN_CHARS,
+    max_len: int = PROMPT_MAX_CHARS,
+) -> str:
+    """Trim to the live competition character window without dropping below min_len when possible."""
+    cleaned = " ".join(text.split())
+    if len(cleaned) <= max_len:
+        return cleaned
+    cut = cleaned[:max_len].rsplit(" ", 1)[0]
+    if len(cut) >= min_len:
+        return cut
+    return cleaned[:max_len]
+
+
 def dataset_prompts_for_category(
     category_number: int,
     count: int,
-    target_words: int = 500,
+    target_words: int = 80,
     seed_offset: int = 0,
 ) -> list[str]:
-    """Expand authored skeletons into *count* unique, >=target_words prompts.
+    """Expand authored skeletons into *count* unique prompts, then fit 20–500 characters.
 
     Combinatorial variety comes from (participant, count, category)-seeded
     selection of skeleton + fill-ins + elaborations.
@@ -555,14 +573,14 @@ def dataset_prompts_for_category(
         words = filled.split()
         if len(words) > int(target_words * 1.15):
             words = words[: int(target_words * 1.15)]
-        prompts.append(" ".join(words))
+        prompts.append(fit_prompt_char_limit(" ".join(words)))
     return prompts
 
 
 def iter_participant_prompts(
     participant_count: int,
     categories: list[dict],
-    target_words: int = 500,
+    target_words: int = 80,
 ) -> Iterator[list[str]]:
     """Yield one list of 5 category prompts per participant."""
     for pidx in range(participant_count):

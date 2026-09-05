@@ -6,6 +6,7 @@ import { TypeHeadline } from '@/components/type-line'
 import { Button } from '@/components/ui/button'
 import { FullScreenLoader } from '@/components/ui/spinner'
 import { CATEGORIES } from '@/lib/categories'
+import { promptLimitCopy } from '@/lib/promptLimits'
 import { CLUB_TAGLINE, COMMUNITY_LINE, COMPETITION_NAME } from '@/lib/brand'
 import { api } from '@/services/api'
 import { useSession } from '@/store/session'
@@ -105,6 +106,9 @@ export default function LandingPage() {
           <h2 className="text-sm font-medium tracking-[0.14em] uppercase text-muted-foreground">
             Categories
           </h2>
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Write one prompt in each category. Every prompt must be {promptLimitCopy()}.
+          </p>
           <ol className="mt-8 divide-y divide-border border-y border-border">
             {CATEGORIES.map((c) => (
               <li key={c.n} className="grid gap-2 py-5 sm:grid-cols-[2.25rem_minmax(0,16rem)_1fr] sm:gap-6">

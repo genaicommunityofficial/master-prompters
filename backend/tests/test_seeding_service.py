@@ -7,27 +7,26 @@ from app.services import test_seeding_service as ts
 
 
 class TestPromptGeneration:
-    def test_generates_correct_word_count(self):
+    def test_generates_within_character_window(self):
         prompts = ts.generate_prompts_for_category(
             category_number=1,
             category_title="Meme Generation",
             category_description="Create an original, engaging, and humorous AI-generated meme prompt.",
             count=5,
-            target_words=500,
+            target_words=80,
         )
         assert len(prompts) == 5
         for p in prompts:
-            words = len(p.split())
-            assert 450 <= words <= 600, f"Expected ~500 words, got {words}"
+            assert 20 <= len(p) <= 500, f"Expected 20–500 characters, got {len(p)}"
 
     def test_prompts_differ_per_category(self):
-        p1 = ts.generate_prompts_for_category(1, "Meme", "Meme desc", count=2, target_words=500)
-        p2 = ts.generate_prompts_for_category(2, "Art", "Art desc", count=2, target_words=500)
+        p1 = ts.generate_prompts_for_category(1, "Meme", "Meme desc", count=2, target_words=80)
+        p2 = ts.generate_prompts_for_category(2, "Art", "Art desc", count=2, target_words=80)
         assert p1[0] != p2[0]
 
     def test_prompts_differ_per_participant(self):
-        prompts_a = ts.generate_prompts_for_category(1, "Meme", "Meme desc", count=3, target_words=500, seed_offset=0)
-        prompts_b = ts.generate_prompts_for_category(1, "Meme", "Meme desc", count=3, target_words=500, seed_offset=7919)
+        prompts_a = ts.generate_prompts_for_category(1, "Meme", "Meme desc", count=3, target_words=80, seed_offset=0)
+        prompts_b = ts.generate_prompts_for_category(1, "Meme", "Meme desc", count=3, target_words=80, seed_offset=7919)
         assert set(prompts_a) != set(prompts_b)
 
 

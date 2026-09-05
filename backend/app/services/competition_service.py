@@ -85,6 +85,6 @@ def to_public_question(q: dict) -> dict:
         "question_number": int(number),
         "title": q.get("title") or f"Question {number}",
         "description": q.get("description"),
-        "max_length": int(q.get("max_length") or 2000),
+        "max_length": int(q.get("max_length") or 500),
         "min_length": int(q.get("min_length") or 20),
     }

@@ -86,7 +86,7 @@ async def submit_individual(
             status_code=400,
             detail=f"'{question['title']}' must be at least {question.get('min_length')} characters.",
         )
-    max_length = int(question.get("max_length") or comp.get("max_submission_length") or 4000)
+    max_length = int(question.get("max_length") or comp.get("max_submission_length") or 500)
     if len(prompt_text) > max_length:
         raise HTTPException(
             status_code=400,
