@@ -327,6 +327,8 @@ export interface CriteriaEntry {
   question_number: number
   file_name: string
   content_hash: string
+  content_md?: string
+  locked?: boolean
   updated_at: string | null
 }
 
@@ -334,4 +336,5 @@ export interface CriteriaDetail {
   question_number: number
   file_name: string | null
   content_md: string
+  locked?: boolean
 }

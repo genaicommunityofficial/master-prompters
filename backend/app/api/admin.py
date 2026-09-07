@@ -233,7 +233,13 @@ class CriteriaListEntry(BaseModel):
     question_number: int
     file_name: str
     content_hash: str
+    content_md: str = ""
+    locked: bool = False
     updated_at: str | None = None
+
+
+class CriteriaSaveRequest(BaseModel):
+    content_md: str
 
 
 @router.get("/criteria", response_model=list[CriteriaListEntry])
@@ -252,6 +258,8 @@ def list_criteria(
                 "question_number": qn,
                 "file_name": r.get("file_name", ""),
                 "content_hash": r.get("content_hash", ""),
+                "content_md": r.get("content_md") or "",
+                "locked": bool(r.get("locked")),
                 "updated_at": r.get("updated_at"),
             }
         )
@@ -268,12 +276,37 @@ def get_criteria(
     rows = eval_criteria_service.get_criteria_for_competition(cid)
     r = rows.get(category)
     if not r:
-        return {"question_number": category, "file_name": None, "content_md": ""}
+        return {
+            "question_number": category,
+            "file_name": None,
+            "content_md": "",
+            "locked": False,
+        }
     return {
         "question_number": category,
         "file_name": r.get("file_name"),
-        "content_md": r.get("content_md"),
+        "content_md": r.get("content_md") or "",
+        "locked": bool(r.get("locked")),
     }
+
+
+def _save_criteria(cid: str, category: int, content: str, file_name: str) -> CriteriaUploadResponse:
+    try:
+        saved = eval_criteria_service.upsert_criteria(
+            competition_id=cid,
+            question_number=category,
+            file_name=file_name,
+            content_md=content,
+        )
+    except eval_criteria_service.CriteriaLockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except eval_criteria_service.CriteriaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CriteriaUploadResponse(
+        question_number=category,
+        file_name=saved["file_name"],
+        content_hash=saved["content_hash"],
+    )
 
 
 @router.post("/criteria", response_model=CriteriaUploadResponse)
@@ -288,18 +321,52 @@ async def upload_criteria(
     content = (await file.read()).decode("utf-8", errors="replace")
     if not content.strip():
         raise HTTPException(status_code=400, detail="Criteria file is empty.")
-    name = file.filename or "criteria.md"
-    saved = eval_criteria_service.upsert_criteria(
-        competition_id=cid,
-        question_number=category,
-        file_name=name,
-        content_md=content,
-    )
-    return CriteriaUploadResponse(
-        question_number=category,
-        file_name=saved["file_name"],
-        content_hash=saved["content_hash"],
-    )
+    return _save_criteria(cid, category, content, file.filename or "criteria.md")
+
+
+@router.put("/criteria/{category}", response_model=CriteriaUploadResponse)
+def save_criteria_text(
+    category: Annotated[int, Path(ge=1, le=5)],
+    body: CriteriaSaveRequest,
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> CriteriaUploadResponse:
+    """Save pasted markdown for a category."""
+    cid = _scoped_competition(payload, competition_id)
+    return _save_criteria(cid, category, body.content_md, "criteria.md")
+
+
+class CriteriaLockResponse(BaseModel):
+    question_number: int
+    locked: bool
+
+
+@router.post("/criteria/{category}/lock", response_model=CriteriaLockResponse)
+def lock_criteria(
+    category: Annotated[int, Path(ge=1, le=5)],
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> CriteriaLockResponse:
+    cid = _scoped_competition(payload, competition_id)
+    try:
+        saved = eval_criteria_service.set_criteria_locked(cid, category, True)
+    except eval_criteria_service.CriteriaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CriteriaLockResponse(question_number=category, locked=bool(saved["locked"]))
+
+
+@router.post("/criteria/{category}/unlock", response_model=CriteriaLockResponse)
+def unlock_criteria(
+    category: Annotated[int, Path(ge=1, le=5)],
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> CriteriaLockResponse:
+    cid = _scoped_competition(payload, competition_id)
+    try:
+        saved = eval_criteria_service.set_criteria_locked(cid, category, False)
+    except eval_criteria_service.CriteriaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CriteriaLockResponse(question_number=category, locked=bool(saved["locked"]))
 
 
 @router.post("/criteria/copy-live")

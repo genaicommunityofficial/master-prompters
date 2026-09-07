@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Copy, Eye, FileText, Upload, X } from 'lucide-react'
+import { Copy, Lock, LockOpen, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
+import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/services/api'
 import type { CriteriaEntry } from '@/types'
 import { Banner } from './Banner'
@@ -11,18 +13,28 @@ import { CATEGORIES } from './constants'
 import type { AdminOutletContext } from './context'
 import { PageHeader } from './PageHeader'
 
+const emptyDrafts = (): Record<number, string> =>
+  Object.fromEntries(CATEGORIES.map((c) => [c.n, ''])) as Record<number, string>
+
 export default function CriteriaPage() {
   const { token, competitionId, testMode } = useOutletContext<AdminOutletContext>()
   const [entries, setEntries] = useState<CriteriaEntry[]>([])
-  const [preview, setPreview] = useState<{ category: number; md: string } | null>(null)
+  const [drafts, setDrafts] = useState<Record<number, string>>(emptyDrafts)
   const [busyCategory, setBusyCategory] = useState<number | null>(null)
   const [copyBusy, setCopyBusy] = useState(false)
+  const [pendingUnlock, setPendingUnlock] = useState<number | null>(null)
   const [error, setError] = useState('')
   const [note, setNote] = useState('')
 
   const load = useCallback(async () => {
     try {
-      setEntries(await api.adminCriteriaList(competitionId, token))
+      const rows = await api.adminCriteriaList(competitionId, token)
+      setEntries(rows)
+      const next = emptyDrafts()
+      for (const row of rows) {
+        next[row.question_number] = row.content_md ?? ''
+      }
+      setDrafts(next)
       setError('')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load criteria.')
@@ -33,27 +45,64 @@ export default function CriteriaPage() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (pendingUnlock == null) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPendingUnlock(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pendingUnlock])
+
   const getEntry = (n: number) => entries.find((e) => e.question_number === n)
 
-  const handleUpload = async (n: number, file: File) => {
+  const handleSave = async (n: number) => {
+    const text = (drafts[n] || '').trim()
+    if (!text) {
+      setError('Enter criteria text before saving.')
+      return
+    }
     setBusyCategory(n)
     try {
-      await api.adminCriteriaUpload(competitionId, n, file, token)
-      setNote(`Criteria uploaded for category ${n}. Used on the next evaluation run.`)
+      await api.adminCriteriaSave(competitionId, n, text, token)
+      setNote(`Saved criteria for category ${n}. Used on the next evaluation run.`)
       await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not upload criteria.')
+      setError(e instanceof Error ? e.message : 'Could not save criteria.')
     } finally {
       setBusyCategory(null)
     }
   }
 
-  const handlePreview = async (n: number) => {
+  const handleLock = async (n: number) => {
+    setBusyCategory(n)
     try {
-      const d = await api.adminCriteriaDetail(competitionId, n, token)
-      setPreview({ category: n, md: d.content_md })
+      await api.adminCriteriaLock(competitionId, n, token)
+      setNote(`Locked category ${n}. Unlock to edit again.`)
+      setPendingUnlock(null)
+      await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load criteria.')
+      setError(e instanceof Error ? e.message : 'Could not lock criteria.')
+    } finally {
+      setBusyCategory(null)
+    }
+  }
+
+  const handleUnlock = async (n: number) => {
+    if (pendingUnlock !== n) {
+      setPendingUnlock(n)
+      return
+    }
+    setBusyCategory(n)
+    try {
+      await api.adminCriteriaUnlock(competitionId, n, token)
+      setNote(`Unlocked category ${n}. You can edit and save again.`)
+      setPendingUnlock(null)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not unlock criteria.')
+    } finally {
+      setBusyCategory(null)
     }
   }
 
@@ -75,7 +124,7 @@ export default function CriteriaPage() {
       <PageHeader
         kicker={testMode ? 'Test dataset' : 'Live rubrics'}
         title="Criteria"
-        description="One markdown rubric per category, injected into Gemini on the next eval run."
+        description="Paste one markdown rubric per category, then lock it so it cannot be edited during evaluation."
       />
       <Banner message={error} onDismiss={() => setError('')} />
       <Banner message={note} onDismiss={() => setNote('')} tone="note" />
@@ -85,76 +134,100 @@ export default function CriteriaPage() {
           Copy live rubrics to test
         </Button>
       ) : null}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FileText className="h-4 w-4" /> Per-category markdown
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {CATEGORIES.map((c) => {
-              const entry = getEntry(c.n)
-              return (
-                <div key={c.n} className="rounded-lg border border-border p-5">
-                  <div className="text-sm font-medium">
+      <div className="space-y-4">
+        {CATEGORIES.map((c) => {
+          const entry = getEntry(c.n)
+          const locked = Boolean(entry?.locked)
+          const saved = Boolean(entry?.content_md?.trim())
+          const busy = busyCategory === c.n
+          const confirmingUnlock = pendingUnlock === c.n
+          const fieldId = `criteria-${c.n}`
+          return (
+            <Card key={c.n}>
+              <CardHeader>
+                <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+                  <span>
                     {c.n}. {c.label}
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    {entry ? (
-                      <>
-                        {entry.file_name}
-                        {entry.updated_at ? ` · ${new Date(entry.updated_at).toLocaleDateString()}` : ''}
-                      </>
-                    ) : (
-                      'No criteria uploaded yet'
-                    )}
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:border-foreground/40">
-                      {busyCategory === c.n ? <Spinner className="h-3.5 w-3.5" /> : <Upload className="h-3.5 w-3.5" />}
-                      {busyCategory === c.n ? 'Uploading…' : 'Upload .md'}
-                      <input
-                        type="file"
-                        accept=".md,.markdown,text/markdown"
-                        className="sr-only"
-                        disabled={busyCategory !== null}
-                        onChange={(e) => {
-                          const f = e.target.files?.[0]
-                          if (f) void handleUpload(c.n, f)
-                          e.target.value = ''
-                        }}
-                      />
-                    </label>
-                    {entry ? (
-                      <Button size="sm" variant="outline" onClick={() => void handlePreview(c.n)}>
-                        <Eye className="h-3.5 w-3.5" /> Preview
-                      </Button>
+                    {locked ? (
+                      <span className="ml-2 text-xs font-normal uppercase tracking-wide text-muted-foreground">
+                        Locked
+                      </span>
                     ) : null}
-                  </div>
+                  </span>
+                  {entry?.updated_at ? (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Saved {new Date(entry.updated_at).toLocaleString()}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-normal text-muted-foreground">Not saved yet</span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Label htmlFor={fieldId} className="sr-only">
+                  Criteria for {c.label}
+                </Label>
+                <Textarea
+                  id={fieldId}
+                  value={drafts[c.n] ?? ''}
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, [c.n]: e.target.value }))}
+                  readOnly={locked}
+                  disabled={busy}
+                  rows={12}
+                  className="min-h-[220px] font-mono text-xs"
+                  placeholder="Paste judging criteria here. Markdown is fine."
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => void handleSave(c.n)}
+                    disabled={busy || locked || !(drafts[c.n] || '').trim()}
+                  >
+                    {busy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                    Save
+                  </Button>
+                  {locked ? (
+                    <>
+                      {confirmingUnlock ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setPendingUnlock(null)}
+                          disabled={busy}
+                        >
+                          Cancel
+                        </Button>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant={confirmingUnlock ? 'destructive' : 'outline'}
+                        onClick={() => void handleUnlock(c.n)}
+                        disabled={busy}
+                        aria-label={
+                          confirmingUnlock ? `Confirm unlock ${c.label}` : `Unlock ${c.label}`
+                        }
+                      >
+                        <LockOpen className="h-4 w-4" />
+                        {confirmingUnlock ? 'Confirm unlock' : 'Unlock'}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleLock(c.n)}
+                      disabled={busy || !saved}
+                    >
+                      <Lock className="h-4 w-4" />
+                      Lock
+                    </Button>
+                  )}
                 </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-      {preview ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-base">
-              <span>Category {preview.category}: criteria preview</span>
-              <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
-                <X className="h-4 w-4" /> Close
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-4 font-mono text-xs leading-relaxed">
-              {preview.md || 'No content.'}
-            </pre>
-          </CardContent>
-        </Card>
-      ) : null}
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
     </div>
   )
 }

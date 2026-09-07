@@ -280,6 +280,24 @@ export const api = {
       token ?? getAdminToken(),
     )
   },
+  adminCriteriaSave: (competitionId: string, category: number, contentMd: string, token?: string) =>
+    request<CriteriaEntry>(
+      withComp(`/admin/criteria/${category}`, competitionId),
+      { method: 'PUT', body: JSON.stringify({ content_md: contentMd }) },
+      token ?? getAdminToken(),
+    ),
+  adminCriteriaLock: (competitionId: string, category: number, token?: string) =>
+    request<{ question_number: number; locked: boolean }>(
+      withComp(`/admin/criteria/${category}/lock`, competitionId),
+      { method: 'POST' },
+      token ?? getAdminToken(),
+    ),
+  adminCriteriaUnlock: (competitionId: string, category: number, token?: string) =>
+    request<{ question_number: number; locked: boolean }>(
+      withComp(`/admin/criteria/${category}/unlock`, competitionId),
+      { method: 'POST' },
+      token ?? getAdminToken(),
+    ),
   adminCopyLiveCriteria: (competitionId: string, token?: string) =>
     request<{ success: boolean; copied: number }>(
       withComp('/admin/criteria/copy-live', competitionId),

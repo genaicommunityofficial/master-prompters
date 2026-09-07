@@ -61,7 +61,7 @@ export default function LeaderboardPage() {
           ) : (
             <>
               <p className="mt-3 text-muted-foreground">
-                Fully scored entries.
+                Top 50 fully scored entries.
               </p>
               <Card className="mt-8">
                 <CardContent className="p-0">
@@ -81,7 +81,7 @@ export default function LeaderboardPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(data?.entries ?? []).map((e, i) => (
+                        {(data?.entries ?? []).slice(0, 50).map((e, i) => (
                           <tr
                             key={`${e.rank}-${i}`}
                             className={cn(

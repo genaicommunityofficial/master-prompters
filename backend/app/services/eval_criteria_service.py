@@ -1,16 +1,23 @@
 """Per-category markdown evaluation criteria.
 
-Admin uploads one markdown rubric per category (question). The content is
-stored in `pc_eval_criteria`. It is injected into the evaluator prompt for
-that category so prompts are judged against the uploaded rubric.
+Admins paste one markdown rubric per category. The content is stored in
+`pc_eval_criteria` and injected into the evaluator prompt. Locked rubrics
+cannot be edited until they are unlocked.
 """
 
 from __future__ import annotations
 
 import hashlib
-from typing import Any
 
 from app.db import db
+
+
+class CriteriaError(Exception):
+    pass
+
+
+class CriteriaLockedError(CriteriaError):
+    pass
 
 
 def content_hash(text: str) -> str:
@@ -36,16 +43,38 @@ def _current_version(question: dict) -> str:
 
 def get_criteria_for_competition(competition_id: str) -> dict[int, dict]:
     """Map question_number -> stored criteria row for a competition."""
-    rows = (
-        db()
-        .table("pc_eval_criteria")
-        .select("competition_id, question_number, file_name, content_md, content_hash, updated_at")
-        .eq("competition_id", competition_id)
-        .execute()
-        .data
-        or []
-    )
-    return {int(r["question_number"]): r for r in rows}
+    try:
+        rows = (
+            db()
+            .table("pc_eval_criteria")
+            .select(
+                "competition_id, question_number, file_name, content_md, "
+                "content_hash, updated_at, locked"
+            )
+            .eq("competition_id", competition_id)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:  # noqa: BLE001
+        rows = (
+            db()
+            .table("pc_eval_criteria")
+            .select(
+                "competition_id, question_number, file_name, content_md, "
+                "content_hash, updated_at"
+            )
+            .eq("competition_id", competition_id)
+            .execute()
+            .data
+            or []
+        )
+    out: dict[int, dict] = {}
+    for r in rows:
+        row = dict(r)
+        row["locked"] = bool(r.get("locked"))
+        out[int(r["question_number"])] = row
+    return out
 
 
 def _upsert_criteria(store, *, competition_id: str, question_number: int,
@@ -66,9 +95,48 @@ def _upsert_criteria(store, *, competition_id: str, question_number: int,
 
 def upsert_criteria(*, competition_id: str, question_number: int,
                     file_name: str, content_md: str) -> dict:
-    return _upsert_criteria(db(), competition_id=competition_id,
-                            question_number=question_number, file_name=file_name,
-                            content_md=content_md)
+    text = (content_md or "").strip()
+    if not text:
+        raise CriteriaError("Criteria text is empty.")
+    current = get_criteria_for_competition(competition_id).get(question_number)
+    if current and current.get("locked"):
+        raise CriteriaLockedError("This rubric is locked. Unlock it before editing.")
+    saved = _upsert_criteria(
+        db(),
+        competition_id=competition_id,
+        question_number=question_number,
+        file_name=file_name,
+        content_md=text,
+    )
+    saved["locked"] = False
+    return saved
+
+
+def set_criteria_locked(competition_id: str, question_number: int, locked: bool) -> dict:
+    current = get_criteria_for_competition(competition_id).get(question_number)
+    if not current or not str(current.get("content_md") or "").strip():
+        raise CriteriaError("Save criteria before locking.")
+    try:
+        updated = (
+            db()
+            .table("pc_eval_criteria")
+            .update({"locked": locked, "updated_at": "now()"})
+            .eq("competition_id", competition_id)
+            .eq("question_number", question_number)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise CriteriaError(
+            "Locking needs migration 0013 (pc_eval_criteria.locked). "
+            "Run supabase/migrations/0013_criteria_lock_top50_leaderboard.sql."
+        ) from exc
+    if not updated.data:
+        raise CriteriaError("Could not update criteria lock.")
+    return {
+        "question_number": question_number,
+        "locked": locked,
+        "content_hash": current.get("content_hash"),
+    }
 
 
 def get_criteria_map_for_eval(competition_id: str) -> dict[int, str]:
@@ -87,6 +155,9 @@ def copy_criteria(source_competition_id: str, dest_competition_id: str) -> int:
     written = 0
     store = db()
     for qn, row in source.items():
+        dest = get_criteria_for_competition(dest_competition_id).get(qn)
+        if dest and dest.get("locked"):
+            continue
         _upsert_criteria(
             store,
             competition_id=dest_competition_id,

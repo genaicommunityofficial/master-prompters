@@ -1,5 +1,7 @@
 """Tests for per-category markdown evaluation criteria + close-submissions gate."""
 
+import pytest
+
 from app.services import admin_analytics_service as aa_svc
 from app.services import eval_criteria_service as crit
 from app.services import submission_service
@@ -120,3 +122,24 @@ def test_copy_criteria_writes_each_source_row(monkeypatch):
     assert crit.copy_criteria("live", "competition_test") == 2
     assert written[0][0] == "competition_test"
     assert {w[1] for w in written} == {1, 2}
+
+
+def test_upsert_rejected_when_locked(monkeypatch):
+    monkeypatch.setattr(
+        crit,
+        "get_criteria_for_competition",
+        lambda cid: {1: {"locked": True, "content_md": "# old"}},
+    )
+    with pytest.raises(crit.CriteriaLockedError, match="locked"):
+        crit.upsert_criteria(
+            competition_id="c1",
+            question_number=1,
+            file_name="criteria.md",
+            content_md="# new",
+        )
+
+
+def test_lock_requires_saved_content(monkeypatch):
+    monkeypatch.setattr(crit, "get_criteria_for_competition", lambda cid: {})
+    with pytest.raises(crit.CriteriaError, match="Save"):
+        crit.set_criteria_locked("c1", 1, True)

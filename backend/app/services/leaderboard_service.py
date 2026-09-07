@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from app.db import db
 
+PUBLIC_LEADERBOARD_LIMIT = 50
+
 
 def set_leaderboard_visible(competition_id: str, visible: bool) -> bool:
     """Set the leaderboard visibility flag on a competition."""
@@ -21,7 +23,8 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
     Only COMPLETED submissions with a total_score are eligible. Only public
     fields (rank, display name, score) are returned. Emails/notes never leave.
     ``ignore_visibility`` lets admins preview a leaderboard before it is
-    published (used by /api/admin/leaderboard).
+    published (used by /api/admin/leaderboard). Public and admin lists are
+    capped at the top 50 scored entries.
     """
     comp = (
         db()
@@ -89,14 +92,15 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
                 tester_ids.add(p["id"])
 
     eligible = [s for s in subs_data if s["participant_id"] not in tester_ids]
+    top = eligible[:PUBLIC_LEADERBOARD_LIMIT]
 
     # Prefetch per-submission category scores so we don't hammer the DB per row.
-    category_score_map = _category_scores_by_submission(eligible)
+    category_score_map = _category_scores_by_submission(top)
 
     entries = []
     rank = 0
     prev_score = None
-    for i, sub in enumerate(eligible, start=1):
+    for i, sub in enumerate(top, start=1):
         score = float(sub["total_score"])
         if score != prev_score:
             rank = i
