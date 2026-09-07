@@ -62,7 +62,7 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
             p_rows = (
                 db()
                 .table("pc_participants")
-                .select("id, display_name, is_pipeline_tester, registration_number")
+                .select("id, display_name, is_pipeline_tester, registration_number, status")
                 .in_("id", chunk)
                 .execute()
                 .data
@@ -72,7 +72,7 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
             p_rows = (
                 db()
                 .table("pc_participants")
-                .select("id, display_name, registration_number")
+                .select("id, display_name, registration_number, status")
                 .in_("id", chunk)
                 .execute()
                 .data
@@ -81,6 +81,8 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
         for p in p_rows:
             names_by_id[p["id"]] = p.get("display_name") or "Participant"
             if p.get("is_pipeline_tester"):
+                tester_ids.add(p["id"])
+            if str(p.get("status") or "").upper() == "DISQUALIFIED":
                 tester_ids.add(p["id"])
             reg = (p.get("registration_number") or "").strip().casefold()
             if reg == "abhinavkumarsaksena":

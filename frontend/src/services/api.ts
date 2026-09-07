@@ -298,6 +298,12 @@ export const api = {
       { method: 'POST', body: JSON.stringify(body) },
       token ?? getAdminToken(),
     ),
+  adminDropParticipant: (competitionId: string, id: string, token?: string) =>
+    request<{ success: boolean; id: string }>(
+      withComp('/admin/participants/drop', competitionId),
+      { method: 'POST', body: JSON.stringify({ id }) },
+      token ?? getAdminToken(),
+    ),
 }
 
 export function extractQrDetails(message: string): string {

@@ -414,6 +414,26 @@ def create_registration(
     }
 
 
+class ParticipantDropRequest(BaseModel):
+    id: str
+
+
+@router.post("/participants/drop")
+def drop_participant(
+    body: ParticipantDropRequest,
+    competition_id: str | None = Query(default=None),
+    payload: dict = Depends(require_admin),
+) -> dict:
+    """Drop a participant from this competition. Never writes to registrations."""
+    cid = _scoped_competition(payload, competition_id)
+    try:
+        return admin_registration_service.drop_participant(cid, body.id)
+    except admin_registration_service.RegistrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not drop participant: {exc}") from exc
+
+
 @router.post("/competition/open")
 def open_competition(
     competition_id: str | None = Query(default=None),

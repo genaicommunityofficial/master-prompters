@@ -16,6 +16,8 @@ from app.db import db, fetch_all
 TEST_COMPETITION_ID = "competition_test"
 MANUAL_QR_PREFIX = "GENAI_QR_MANUAL_"
 PIPELINE_TESTER_REG = "abhinavkumarsaksena"
+DROPPED_STATUS = "DISQUALIFIED"
+DROPPED_LOGIN_MSG = "This registration has been dropped from the competition."
 
 
 class RegistrationError(Exception):
@@ -47,6 +49,12 @@ def _is_tester(row: dict[str, Any]) -> bool:
 def _is_manual(row: dict[str, Any]) -> bool:
     token = str(row.get("qr_token") or "")
     return token.startswith(MANUAL_QR_PREFIX)
+
+
+def _is_dropped(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    return str(row.get("status") or "").upper() == DROPPED_STATUS
 
 
 _HAS_TESTER_COL: bool | None = None
@@ -147,7 +155,18 @@ def _row(
 def list_roster(competition_id: str) -> dict[str, Any]:
     """Merged participant list for the admin Participants page."""
     test_mode = competition_id == TEST_COMPETITION_ID
-    parts = [p for p in _load_participants(competition_id) if not _is_tester(p)]
+    loaded = [p for p in _load_participants(competition_id) if not _is_tester(p)]
+    dropped_reg_ids = {
+        str(p.get("registration_id") or "")
+        for p in loaded
+        if _is_dropped(p) and p.get("registration_id")
+    }
+    dropped_regnums = {
+        normalize_reg(p.get("registration_number")).casefold()
+        for p in loaded
+        if _is_dropped(p) and normalize_reg(p.get("registration_number"))
+    }
+    parts = [p for p in loaded if not _is_dropped(p)]
     subs = _load_submissions(competition_id)
     part_by_id = {p["id"]: p for p in parts}
     part_by_reg_id = {str(p.get("registration_id") or ""): p for p in parts if p.get("registration_id")}
@@ -180,6 +199,8 @@ def list_roster(competition_id: str) -> dict[str, Any]:
         for reg in _load_event_registrations(event_id):
             number = _reg_number(reg)
             if not number:
+                continue
+            if str(reg.get("id") or "") in dropped_reg_ids or number.casefold() in dropped_regnums:
                 continue
             p = part_by_reg_id.get(str(reg.get("id") or "")) or part_by_regnum.get(number.casefold())
             if p:
@@ -293,3 +314,122 @@ def register_participant(
     if not created.data:
         raise RegistrationError("Could not register participant.")
     return created.data[0]
+
+
+def _participant_by_id(competition_id: str, participant_id: str) -> dict[str, Any] | None:
+    rows = (
+        db()
+        .table("pc_participants")
+        .select("*")
+        .eq("competition_id", competition_id)
+        .eq("id", participant_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
+def _participant_by_registration_id(competition_id: str, registration_id: str) -> dict[str, Any] | None:
+    rows = (
+        db()
+        .table("pc_participants")
+        .select("*")
+        .eq("competition_id", competition_id)
+        .eq("registration_id", registration_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
+def _read_event_registration(registration_id: str) -> dict[str, Any] | None:
+    """Read-only lookup. Never updates registrations."""
+    rows = (
+        db()
+        .table("registrations")
+        .select("id, full_name, vit_registration_number, qr_token, personal_email, college_email")
+        .eq("id", registration_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
+def _disqualify_row(row: dict[str, Any]) -> dict[str, Any]:
+    if _is_tester(row):
+        raise RegistrationError("Pipeline testers cannot be dropped.")
+    if _is_dropped(row):
+        return {"success": True, "id": row["id"]}
+    updated = (
+        db()
+        .table("pc_participants")
+        .update(
+            {
+                "status": DROPPED_STATUS,
+                "session_token_hash": None,
+                "session_expires_at": None,
+                "updated_at": "now()",
+            }
+        )
+        .eq("id", row["id"])
+        .eq("competition_id", row["competition_id"])
+        .execute()
+    )
+    if not updated.data:
+        raise RegistrationError("Could not drop participant.")
+    return {"success": True, "id": row["id"]}
+
+
+def drop_participant(competition_id: str, roster_id: str) -> dict[str, Any]:
+    """Drop a live or test participant so they cannot log in.
+
+    Writes ``pc_participants`` only (status DISQUALIFIED). The ``registrations``
+    table is never inserted, updated, or deleted.
+    """
+    rid = (roster_id or "").strip()
+    if not rid:
+        raise RegistrationError("Participant id is required.")
+
+    if rid.startswith("reg:"):
+        registration_id = rid[4:]
+        existing = _participant_by_registration_id(competition_id, registration_id)
+        if existing:
+            return _disqualify_row(existing)
+        event = _read_event_registration(registration_id)
+        if not event:
+            raise RegistrationError("Participant not found.")
+        qr = event.get("qr_token")
+        if not qr:
+            raise RegistrationError("That registration has no QR token, so it cannot be dropped.")
+        number = _reg_number(event)
+        payload = {
+            "competition_id": competition_id,
+            "registration_id": event["id"],
+            "qr_token": qr,
+            "registration_number": number or None,
+            "display_name": _reg_name(event) or None,
+            "email": event.get("personal_email") or event.get("college_email"),
+            "status": DROPPED_STATUS,
+            "is_pipeline_tester": False,
+            "session_token_hash": None,
+            "session_expires_at": None,
+        }
+        try:
+            created = db().table("pc_participants").insert(payload).execute()
+        except Exception:  # noqa: BLE001
+            payload.pop("is_pipeline_tester", None)
+            created = db().table("pc_participants").insert(payload).execute()
+        if not created.data:
+            raise RegistrationError("Could not drop participant.")
+        return {"success": True, "id": created.data[0]["id"]}
+
+    existing = _participant_by_id(competition_id, rid)
+    if not existing:
+        raise RegistrationError("Participant not found.")
+    return _disqualify_row(existing)

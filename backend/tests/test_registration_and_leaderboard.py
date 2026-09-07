@@ -141,6 +141,60 @@ class TestRegistrationNumberLogin:
         with pytest.raises(AuthError):
             login_with_registration_number("23BCE0001", "competition_2026")
 
+    @patch("app.services.auth_service.db")
+    def test_dropped_participant_cannot_login(self, mock_db):
+        store = MagicMock()
+        mock_db.return_value = store
+        comp = MagicMock()
+        comp.data = [{"status": "OPEN", "qr_event_id": None}]
+        part = MagicMock()
+        part.data = [
+            _participant(
+                status="DISQUALIFIED",
+                is_pipeline_tester=True,
+                qr_token="GENAI_QR_MANUAL_X",
+            )
+        ]
+
+        store.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = comp
+        store.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = part
+
+        with pytest.raises(AuthError, match="dropped"):
+            login_with_registration_number("23BCE0001", "competition_2026")
+
+    @patch("app.services.auth_service.settings")
+    @patch("app.services.auth_service.db")
+    def test_dropped_participant_cannot_qr_login(self, mock_db, mock_settings):
+        mock_settings.qr_event_id = ""
+        store = MagicMock()
+        mock_db.return_value = store
+        comp = MagicMock()
+        comp.data = [{"status": "OPEN", "qr_event_id": None, "id": "competition_2026"}]
+        qr = MagicMock()
+        qr.data = [{
+            "id": str(uuid.uuid4()),
+            "qr_token": "GENAI_QR_ABC",
+            "vit_registration_number": "23BCE0001",
+            "registration_status": "verified",
+            "full_name": "Ada",
+        }]
+        dropped = MagicMock()
+        dropped.data = [_participant(status="DISQUALIFIED", qr_token="GENAI_QR_ABC")]
+
+        def table(name):
+            t = MagicMock()
+            if name == "pc_competitions":
+                t.select.return_value.eq.return_value.limit.return_value.execute.return_value = comp
+            elif name == "registrations":
+                t.select.return_value.eq.return_value.limit.return_value.execute.return_value = qr
+            else:
+                t.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = dropped
+            return t
+
+        store.table.side_effect = table
+        with pytest.raises(AuthError, match="dropped"):
+            login_with_qr_message("GENAI_QR_ABC", "competition_2026", "23BCE0001")
+
 
 class TestQrMatchesRegistration:
     @patch("app.services.auth_service.settings")
@@ -202,6 +256,111 @@ class TestAdminRegistration:
             admin_registration_service.register_participant("competition_2026", "23BCE0001")
 
 
+class TestDropParticipant:
+    @patch("app.services.admin_registration_service.db")
+    def test_drop_existing_marks_disqualified_without_touching_registrations(self, mock_db):
+        store = MagicMock()
+        mock_db.return_value = store
+        row = _participant()
+        empty = MagicMock()
+        empty.data = []
+        found = MagicMock()
+        found.data = [row]
+        updated = MagicMock()
+        updated.data = [{**row, "status": "DISQUALIFIED"}]
+        writes: list[tuple[str, str]] = []
+
+        def table(name):
+            t = MagicMock()
+            if name == "registrations":
+                t.update.side_effect = AssertionError("must not update registrations")
+                t.insert.side_effect = AssertionError("must not insert registrations")
+                t.delete.side_effect = AssertionError("must not delete registrations")
+                return t
+
+            def _update(payload):
+                writes.append((name, "update"))
+                assert payload["status"] == "DISQUALIFIED"
+                assert payload["session_token_hash"] is None
+                chain = MagicMock()
+                chain.eq.return_value.eq.return_value.execute.return_value = updated
+                chain.eq.return_value.execute.return_value = updated
+                return chain
+
+            t.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = found
+            t.update.side_effect = _update
+            return t
+
+        store.table.side_effect = table
+        out = admin_registration_service.drop_participant("competition_2026", row["id"])
+        assert out["success"] is True
+        assert out["id"] == row["id"]
+        assert writes == [("pc_participants", "update")]
+
+    @patch("app.services.admin_registration_service.db")
+    def test_drop_event_only_inserts_stub_and_does_not_write_registrations(self, mock_db):
+        store = MagicMock()
+        mock_db.return_value = store
+        event_id = str(uuid.uuid4())
+        event_reg = {
+            "id": event_id,
+            "qr_token": "GENAI_QR_LIVE",
+            "vit_registration_number": "23BCE0001",
+            "full_name": "Ada Lovelace",
+            "personal_email": "ada@example.com",
+            "college_email": None,
+        }
+        nobody = MagicMock()
+        nobody.data = []
+        created = _participant(
+            registration_id=event_id,
+            qr_token="GENAI_QR_LIVE",
+            status="DISQUALIFIED",
+        )
+        inserted = MagicMock()
+        inserted.data = [created]
+        writes: list[str] = []
+
+        def table(name):
+            t = MagicMock()
+            if name == "registrations":
+                t.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [event_reg]
+                t.update.side_effect = AssertionError("must not update registrations")
+                t.insert.side_effect = AssertionError("must not insert registrations")
+                t.delete.side_effect = AssertionError("must not delete registrations")
+                return t
+            t.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = nobody
+            t.select.return_value.eq.return_value.limit.return_value.execute.return_value = nobody
+
+            def _insert(payload):
+                writes.append("insert")
+                assert payload["status"] == "DISQUALIFIED"
+                assert payload["qr_token"] == "GENAI_QR_LIVE"
+                assert payload["registration_id"] == event_id
+                chain = MagicMock()
+                chain.execute.return_value = inserted
+                return chain
+
+            t.insert.side_effect = _insert
+            return t
+
+        store.table.side_effect = table
+        out = admin_registration_service.drop_participant("competition_2026", f"reg:{event_id}")
+        assert out["success"] is True
+        assert writes == ["insert"]
+
+    @patch("app.services.admin_registration_service.db")
+    def test_drop_tester_rejected(self, mock_db):
+        store = MagicMock()
+        mock_db.return_value = store
+        tester = _participant(is_pipeline_tester=True, registration_number="abhinavkumarsaksena")
+        store.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+            tester
+        ]
+        with pytest.raises(admin_registration_service.RegistrationError, match="tester"):
+            admin_registration_service.drop_participant("competition_2026", tester["id"])
+
+
 class TestRoster:
     @patch("app.services.admin_registration_service.fetch_all")
     @patch("app.services.admin_registration_service.db")
@@ -251,6 +410,57 @@ class TestRoster:
         assert event_row["source"] == "event"
         added = next(r for r in out["participants"] if r["source"] == "added")
         assert added["logged_in"] is False
+
+    @patch("app.services.admin_registration_service.fetch_all")
+    @patch("app.services.admin_registration_service.db")
+    def test_live_roster_hides_dropped(self, mock_db, mock_fetch):
+        store = MagicMock()
+        mock_db.return_value = store
+        store.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+            {"qr_event_id": "evt"}
+        ]
+        event_id = str(uuid.uuid4())
+        dropped = _participant(
+            registration_id=event_id,
+            registration_number="23BCE0001",
+            status="DISQUALIFIED",
+        )
+        extra = _participant(
+            qr_token="GENAI_QR_MANUAL_Z",
+            registration_number="ADMIN01",
+            display_name="Walk-in",
+        )
+
+        def fake_fetch(table, select, eq=None, order=None, descending=False):
+            if table == "pc_participants":
+                return [dropped, extra]
+            if table == "pc_submissions":
+                return []
+            if table == "registrations":
+                return [{
+                    "id": event_id,
+                    "full_name": "Ada Lovelace",
+                    "vit_registration_number": "23BCE0001",
+                }]
+            return []
+
+        mock_fetch.side_effect = fake_fetch
+        out = admin_registration_service.list_roster("competition_2026")
+        numbers = {r["registration_number"] for r in out["participants"]}
+        assert "23BCE0001" not in numbers
+        assert "ADMIN01" in numbers
+
+    @patch("app.services.admin_registration_service.fetch_all")
+    @patch("app.services.admin_registration_service.db")
+    def test_test_roster_hides_dropped(self, mock_db, mock_fetch):
+        kept = _participant(display_name="Keep", registration_number="T1")
+        dropped = _participant(display_name="Gone", registration_number="T2", status="DISQUALIFIED")
+        mock_fetch.side_effect = lambda table, *a, **k: (
+            [kept, dropped] if table == "pc_participants" else []
+        )
+        out = admin_registration_service.list_roster("competition_test")
+        names = {r["display_name"] for r in out["participants"]}
+        assert names == {"Keep"}
 
     @patch("app.services.admin_registration_service.fetch_all")
     @patch("app.services.admin_registration_service.db")

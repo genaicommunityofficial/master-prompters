@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.db import db
 from app.security.auth import create_participant_token
-from app.services.admin_registration_service import MANUAL_QR_PREFIX, normalize_reg
+from app.services.admin_registration_service import DROPPED_LOGIN_MSG, MANUAL_QR_PREFIX, normalize_reg
 from app.services.session_guard import (
     ALREADY_SIGNED_IN_MSG,
     hash_session_token,
@@ -232,7 +232,13 @@ def _ensure_competition_open(competition_id: str) -> None:
     _ensure_accepting_logins(_load_competition(competition_id))
 
 
+def _ensure_not_dropped(participant: dict) -> None:
+    if str(participant.get("status") or "").upper() == "DISQUALIFIED":
+        raise AuthError(DROPPED_LOGIN_MSG)
+
+
 def _issue_session(competition_id: str, participant: dict, *, registration_number: str | None) -> dict:
+    _ensure_not_dropped(participant)
     status = submission_status(participant["id"], competition_id)
     if session_blocks_new_login(participant, status):
         raise AuthError(ALREADY_SIGNED_IN_MSG)
@@ -325,6 +331,8 @@ def login_with_registration_number(registration_number: str, competition_id: str
         raise AuthError("Please enter your registration number.")
 
     participant = _find_participant_by_reg(competition_id, needle)
+    if participant:
+        _ensure_not_dropped(participant)
     if participant and _can_skip_qr(participant):
         return _issue_session(
             competition_id,
@@ -368,6 +376,7 @@ def login_with_qr_message(
         raise AuthError("That QR code does not match the registration number you entered.")
 
     participant = ensure_participant(competition_id, reg)
+    _ensure_not_dropped(participant)
     session = _issue_session(
         competition_id,
         participant,

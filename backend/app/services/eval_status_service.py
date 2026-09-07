@@ -318,6 +318,11 @@ def get_participation_funnel(competition_id: str) -> dict[str, Any]:
             f"in the Supabase SQL editor. ({exc})"
         ) from exc
 
+    participants = [
+        p for p in participants if str(p.get("status") or "").upper() != "DISQUALIFIED"
+    ]
+    kept_ids = {p["id"] for p in participants}
+
     submissions = (
         store.table("pc_submissions")
         .select("id, participant_id, status, total_score")
@@ -326,6 +331,7 @@ def get_participation_funnel(competition_id: str) -> dict[str, Any]:
         .data
         or []
     )
+    submissions = [s for s in submissions if s.get("participant_id") in kept_ids]
 
     sub_by_participant: dict[str, dict] = {}
     for s in submissions:
