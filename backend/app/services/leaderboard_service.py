@@ -58,6 +58,7 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
     # Prefetch display names in bulk so we don't query per entry.
     participant_ids = list({s["participant_id"] for s in subs_data})
     names_by_id: dict[str, str] = {}
+    regs_by_id: dict[str, str | None] = {}
     tester_ids: set[str] = set()
     for i in range(0, len(participant_ids), 100):
         chunk = participant_ids[i : i + 100]
@@ -83,12 +84,13 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
             )
         for p in p_rows:
             names_by_id[p["id"]] = p.get("display_name") or "Participant"
+            number = (p.get("registration_number") or "").strip()
+            regs_by_id[p["id"]] = number or None
             if p.get("is_pipeline_tester"):
                 tester_ids.add(p["id"])
             if str(p.get("status") or "").upper() == "DISQUALIFIED":
                 tester_ids.add(p["id"])
-            reg = (p.get("registration_number") or "").strip().casefold()
-            if reg == "abhinavkumarsaksena":
+            if (number or "").casefold() == "abhinavkumarsaksena":
                 tester_ids.add(p["id"])
 
     eligible = [s for s in subs_data if s["participant_id"] not in tester_ids]
@@ -117,6 +119,7 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
             {
                 "rank": rank,
                 "display_name": name,
+                "registration_number": regs_by_id.get(sub["participant_id"]),
                 "total_score": score,
                 "category_scores": category_scores,
                 "average_score": average_score,

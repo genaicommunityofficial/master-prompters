@@ -59,6 +59,7 @@ export interface SubmissionReceipt {
 export interface LeaderboardEntry {
   rank: number
   display_name: string
+  registration_number?: string | null
   total_score: number
   category_scores?: Record<number, number>
   average_score?: number | null

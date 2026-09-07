@@ -8,6 +8,21 @@ import type { LeaderboardResponse } from '@/types'
 import { COMPETITION_NAME } from '@/lib/brand'
 import { cn } from '@/lib/utils'
 
+function rankRowClass(rank: number): string {
+  if (rank === 1) return 'bg-amber-100/90 dark:bg-amber-500/20'
+  if (rank === 2) return 'bg-zinc-200/80 dark:bg-zinc-500/25'
+  if (rank === 3) return 'bg-orange-100/80 dark:bg-orange-500/20'
+  if (rank >= 4 && rank <= 10) return 'bg-stone-100 dark:bg-stone-500/15'
+  return ''
+}
+
+function rankMarkClass(rank: number): string {
+  if (rank === 1) return 'text-amber-800 dark:text-amber-200'
+  if (rank === 2) return 'text-zinc-700 dark:text-zinc-200'
+  if (rank === 3) return 'text-orange-800 dark:text-orange-200'
+  return ''
+}
+
 export default function LeaderboardPage() {
   const competitionId = useSession((s) => s.competitionId)
   const [data, setData] = useState<LeaderboardResponse | null>(null)
@@ -44,7 +59,7 @@ export default function LeaderboardPage() {
   return (
     <PageShell>
       <section className="container py-12 md:py-16">
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto max-w-5xl">
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
             {COMPETITION_NAME}
           </p>
@@ -60,8 +75,8 @@ export default function LeaderboardPage() {
             </div>
           ) : (
             <>
-              <p className="mt-3 text-muted-foreground">
-                Top 50 fully scored entries.
+              <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
+                Congratulations to everyone who made the top fifty.
               </p>
               <Card className="mt-8">
                 <CardContent className="p-0">
@@ -71,6 +86,7 @@ export default function LeaderboardPage() {
                         <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
                           <th className="px-5 py-3 font-medium">Rank</th>
                           <th className="px-5 py-3 font-medium">Participant</th>
+                          <th className="px-5 py-3 font-medium">Reg. no.</th>
                           {[1, 2, 3, 4, 5].map((q) => (
                             <th key={q} className="px-3 py-3 text-right font-medium">
                               Q{q}
@@ -83,14 +99,19 @@ export default function LeaderboardPage() {
                       <tbody>
                         {(data?.entries ?? []).slice(0, 50).map((e, i) => (
                           <tr
-                            key={`${e.rank}-${i}`}
+                            key={`${e.rank}-${e.registration_number ?? e.display_name}-${i}`}
                             className={cn(
                               'border-b border-border/60 last:border-0',
-                              i <= 2 ? 'bg-muted/30' : '',
+                              rankRowClass(e.rank),
                             )}
                           >
-                            <td className="px-5 py-3.5 font-semibold">{e.rank}</td>
+                            <td className={cn('px-5 py-3.5 font-semibold tabular-nums', rankMarkClass(e.rank))}>
+                              {e.rank}
+                            </td>
                             <td className="px-5 py-3.5">{e.display_name}</td>
+                            <td className="px-5 py-3.5 tabular-nums text-muted-foreground">
+                              {e.registration_number || '—'}
+                            </td>
                             {[1, 2, 3, 4, 5].map((q) => (
                               <td
                                 key={q}
@@ -109,7 +130,7 @@ export default function LeaderboardPage() {
                         ))}
                         {data?.entries.length === 0 ? (
                           <tr>
-                            <td colSpan={9} className="px-5 py-8 text-center text-muted-foreground">
+                            <td colSpan={10} className="px-5 py-8 text-center text-muted-foreground">
                               No results published yet.
                             </td>
                           </tr>

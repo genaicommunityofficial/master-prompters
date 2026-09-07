@@ -595,6 +595,33 @@ class TestLeaderboardCategories:
         assert data["entries"][0]["display_name"] == "P0"
         assert data["entries"][-1]["display_name"] == "P49"
 
+    @patch("app.services.leaderboard_service._category_scores_by_submission")
+    @patch("app.services.leaderboard_service.db")
+    def test_leaderboard_includes_registration_number(self, mock_db, mock_cats):
+        from app.services import leaderboard_service as svc
+
+        mock_cats.return_value = {}
+
+        class R:
+            def __init__(self, data):
+                self.data = data
+
+        seq = iter([
+            R([{"leaderboard_visible": True, "status": "OPEN"}]),
+            R([{"id": "s1", "total_score": 420.0, "rank": 1, "participant_id": "p1"}]),
+            R([{
+                "id": "p1",
+                "display_name": "Ada",
+                "is_pipeline_tester": False,
+                "registration_number": "23BCE0001",
+            }]),
+        ])
+        store = MagicMock()
+        store.table.side_effect = lambda name: _ScriptedTable(name, seq)
+        mock_db.return_value = store
+        data = svc.get_leaderboard("competition_2026")
+        assert data["entries"][0]["registration_number"] == "23BCE0001"
+
 
 class _ScriptedTable:
     """Fluent fake that dispatches to a shared scripted sequence on execute()."""
