@@ -80,6 +80,7 @@ def seed_test_data(participant_count: int = 50) -> dict[str, Any]:
             "id": pid,
             "competition_id": TEST_COMPETITION_ID,
             "registration_id": str(uuid.uuid4()),
+            "registration_number": f"TEST-{pid.replace('-', '')[:12].upper()}",
             "qr_token": f"TEST_{pid.replace('-', '')[:16]}",
             "display_name": f"Test User {pid[:8]}",
             "email": f"test-{pid[:8]}@test.local",

@@ -121,7 +121,7 @@ def _event_id_for_competition(competition_id: str) -> str:
 
 def _load_event_registrations(event_id: str) -> list[dict[str, Any]]:
     """Read-only fetch of event registrations (number + name)."""
-    select = "id, full_name, vit_registration_number"
+    select = "id, full_name, vit_registration_number, qr_token"
     eq = {"event_id": event_id} if event_id else None
     try:
         return fetch_all("registrations", select, eq=eq)

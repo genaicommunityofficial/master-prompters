@@ -82,6 +82,7 @@ def main() -> int:
             "id": pid,
             "competition_id": test_seeding_service.TEST_COMPETITION_ID,
             "registration_id": str(uuid.uuid4()),
+            "registration_number": f"TEST-{pid.replace('-', '')[:12].upper()}",
             "qr_token": f"DS_{pid.replace('-', '')[:16]}",
             "display_name": f"Dataset User {pid[:8]}",
             "email": f"dataset-{pid[:8]}@test.local",

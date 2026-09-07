@@ -199,7 +199,7 @@ def export_prompts(
         category=category,
     )
     # CSV is returned by the dedicated CSV route below; this route reports shape.
-    return ExportResponse(filename=filename, row_count=len(data), columns=[c[0] for c in columns])
+    return ExportResponse(filename=filename, row_count=len(data), columns=[c[1] for c in columns])
 
 
 @router.get("/export/csv")

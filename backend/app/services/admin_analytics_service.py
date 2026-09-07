@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from typing import Any
 
 from app.db import db
+
+REST_PAGE = 1000
 
 # Categories 1-5 in display order (matches pc_questions for the real competition).
 CATEGORY_TITLES = {
@@ -54,201 +57,284 @@ def get_analytics(competition_id: str) -> dict[str, Any]:
     }
 
 
-def _resolve_registrations(registration_ids: list[str]) -> dict[str, dict]:
-    """Batch-load registration rows by id (chunked to respect URL limits)."""
-    out: dict[str, dict] = {}
-    ids = [rid for rid in registration_ids if rid]
-    for i in range(0, len(ids), 100):
-        chunk = ids[i : i + 100]
-        try:
-            rows = (
+def _event_registration_lookup(competition_id: str) -> dict[str, dict[str, str]]:
+    """Map event id / QR / VIT number -> registration number and name."""
+    from app.services.admin_registration_service import (
+        TEST_COMPETITION_ID,
+        _event_id_for_competition,
+        _load_event_registrations,
+        _reg_name,
+        _reg_number,
+        normalize_reg,
+    )
+
+    if competition_id == TEST_COMPETITION_ID:
+        return {}
+    event_id = _event_id_for_competition(competition_id)
+    out: dict[str, dict[str, str]] = {}
+    for row in _load_event_registrations(event_id):
+        info = {
+            "registration_number": _reg_number(row),
+            "display_name": _reg_name(row),
+        }
+        rid = str(row.get("id") or "")
+        if rid:
+            out[rid] = info
+        qr = str(row.get("qr_token") or "").strip()
+        if qr:
+            out[qr] = info
+        number = normalize_reg(info["registration_number"])
+        if number:
+            out[number.casefold()] = info
+    return out
+
+
+def _clean_display_name(name: str, registration_number: str | None) -> str:
+    cleaned = (name or "").strip()
+    number = (registration_number or "").strip()
+    if number and cleaned.upper().endswith(number.upper()):
+        cleaned = cleaned[: -len(number)].strip()
+    return cleaned
+
+
+def _event_for_participant(
+    participant: dict, event_lookup: dict[str, dict[str, str]]
+) -> dict[str, str]:
+    from app.services.admin_registration_service import normalize_reg
+
+    keys = [
+        str(participant.get("registration_id") or ""),
+        str(participant.get("qr_token") or "").strip(),
+        normalize_reg(participant.get("registration_number")).casefold(),
+    ]
+    for key in keys:
+        if key and key in event_lookup:
+            return event_lookup[key]
+    return {}
+
+
+def _export_display_name(participant: dict, event_lookup: dict[str, dict[str, str]]) -> str:
+    event = _event_for_participant(participant, event_lookup)
+    event_name = (event.get("display_name") or "").strip()
+    number = (event.get("registration_number") or participant.get("registration_number") or "")
+    if event_name:
+        return _clean_display_name(event_name, str(number))
+    return _clean_display_name(str(participant.get("display_name") or ""), str(number))
+
+
+def _export_registration_number(
+    participant: dict,
+    event_lookup: dict[str, dict[str, str]],
+) -> str:
+    """Registration number only — never name, email, or QR text."""
+    from app.services.admin_registration_service import normalize_reg
+
+    event = _event_for_participant(participant, event_lookup)
+    event_number = normalize_reg(event.get("registration_number"))
+    if event_number:
+        return event_number
+    return normalize_reg(participant.get("registration_number"))
+
+
+def _fetch_eq(table: str, select: str, competition_id: str) -> list[dict]:
+    """Range-paginate rows for one competition using this module's db()."""
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        builder = (
+            db()
+            .table(table)
+            .select(select)
+            .eq("competition_id", competition_id)
+            .range(offset, offset + REST_PAGE - 1)
+        )
+        page = builder.execute().data or []
+        rows.extend(page)
+        if len(page) < REST_PAGE:
+            break
+        offset += REST_PAGE
+    return rows
+
+
+def _fetch_in(table: str, select: str, column: str, values: list[str]) -> list[dict]:
+    rows: list[dict] = []
+    for i in range(0, len(values), 200):
+        chunk = values[i : i + 200]
+        offset = 0
+        while True:
+            page = (
                 db()
-                .table("registrations")
-                .select("id, name, full_name, email, phone, college, registration_number")
-                .in_("id", chunk)
+                .table(table)
+                .select(select)
+                .in_(column, chunk)
+                .range(offset, offset + REST_PAGE - 1)
                 .execute()
                 .data
                 or []
             )
-        except Exception:  # noqa: BLE001
-            continue
-        for row in rows:
-            out[row["id"]] = row
-    return out
+            rows.extend(page)
+            if len(page) < REST_PAGE:
+                break
+            offset += REST_PAGE
+    return rows
 
 
 def _participant_details(competition_id: str) -> dict[str, dict]:
-    """Map participant_id -> participant + registration details."""
-    parts = (
+    """Map participant_id -> registration number and name for export."""
+    from app.services.admin_registration_service import TEST_COMPETITION_ID, _is_manual, _is_tester
+
+    select_full = (
+        "id, competition_id, registration_id, registration_number, "
+        "display_name, status, qr_token, is_pipeline_tester"
+    )
+    select_base = (
+        "id, competition_id, registration_id, registration_number, "
+        "display_name, status, qr_token"
+    )
+    try:
+        parts = _fetch_eq("pc_participants", select_full, competition_id)
+    except Exception:  # noqa: BLE001
+        parts = _fetch_eq("pc_participants", select_base, competition_id)
+    live = competition_id != TEST_COMPETITION_ID
+    kept: list[dict] = []
+    for p in parts:
+        if str(p.get("status") or "").upper() == "DISQUALIFIED":
+            continue
+        if _is_tester(p):
+            continue
+        if live and _is_manual(p):
+            continue
+        kept.append(p)
+    event_lookup = _event_registration_lookup(competition_id)
+    out: dict[str, dict] = {}
+    for p in kept:
+        out[p["id"]] = {
+            "registration_number": _export_registration_number(p, event_lookup),
+            "display_name": _export_display_name(p, event_lookup),
+        }
+    return out
+
+
+def _questions_for_competition(competition_id: str) -> dict[str, dict[str, Any]]:
+    rows = (
         db()
-        .table("pc_participants")
-        .select("id, competition_id, registration_id, qr_token, display_name, email")
+        .table("pc_questions")
+        .select("id, question_number, title")
         .eq("competition_id", competition_id)
         .execute()
         .data
         or []
     )
-    regs = _resolve_registrations([p.get("registration_id") or "" for p in parts])
-    out: dict[str, dict] = {}
-    for p in parts:
-        reg = regs.get(p.get("registration_id") or "", {})
-        out[p["id"]] = {
-            "display_name": p.get("display_name"),
-            "participant_email": p.get("email"),
-            "qr_token": p.get("qr_token"),
-            "registration_number": reg.get("registration_number")
-            or reg.get("registration_no") or "",
-            "full_name": reg.get("full_name") or reg.get("name") or "",
-            "email": reg.get("email") or "",
-            "phone": reg.get("phone") or "",
-            "college": reg.get("college") or "",
-        }
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        number = int(row.get("question_number") or 0)
+        title = (row.get("title") or "").strip() or CATEGORY_TITLES.get(number, f"Category {number}")
+        out[row["id"]] = {"number": number, "title": title}
     return out
 
 
 def build_export_columns(competition_id: str) -> list[tuple[str, str]]:
-    """Return (select postgres stamp, header) pairs."""
+    """Return (field, header) pairs for the prompt sheet."""
     return [
-        ("registration_number", "Registration Number"),
-        ("full_name", "Full Name"),
-        ("email", "Email"),
-        ("phone", "Phone"),
-        ("college", "College"),
+        ("registration_number", "Reg No"),
+        ("display_name", "Name"),
+        ("category_title", "Category"),
         ("prompt_text", "Prompt"),
     ]
+
+
+def _natural_sort_key(value: str) -> tuple:
+    parts = re.split(r"(\d+)", (value or "").strip().casefold())
+    return tuple(int(part) if part.isdigit() else part for part in parts)
 
 
 def order_export_blocks(
     rows: list[dict], by_category: bool = False
 ) -> list[dict]:
-    """Return rows in strict category 1..N order, grouped per category.
-
-    All rows for category 1 first, then category 2, etc. This produces a clean
-    sequential category-wise export instead of interleaved data.
-    """
+    """Keep each person together, in natural reg-no order, then category 1..N."""
     if not rows:
         return []
-    max_cat = max((int(r.get("category") or 0) for r in rows), default=5)
-    ordered: list[dict] = []
-    for cat in range(1, max_cat + 1):
-        ordered.extend(r for r in rows if int(r.get("category") or 0) == cat)
-    return ordered
+
+    def sort_key(row: dict) -> tuple:
+        number = int(row.get("category") or 0)
+        return (
+            _natural_sort_key(str(row.get("registration_number") or "")),
+            (row.get("display_name") or "").strip().casefold(),
+            number if number > 0 else 10_000,
+        )
+
+    return sorted(rows, key=sort_key)
+
+
+def _export_filename(competition_id: str, category: int | None) -> str:
+    scope = "test" if competition_id == "competition_test" else "live"
+    if category:
+        return f"prompts_{scope}_category_{category}.csv"
+    return f"prompts_{scope}_all.csv"
 
 
 def build_export(competition_id: str, category: int | None = None) -> tuple[list[dict], list[tuple[str, str]], str]:
-    """Return (rows, column_specs, filename) for JSON/structured use."""
+    """One row per visible participant and category, with prompt text when saved."""
+    colspec = build_export_columns(competition_id)
+    filename = _export_filename(competition_id, category)
+    questions = _questions_for_competition(competition_id)
     detail_map = _participant_details(competition_id)
-
-    subs = (
-        db()
-        .table("pc_submissions")
-        .select("id, participant_id")
-        .eq("competition_id", competition_id)
-        .execute()
-        .data
-        or []
-    )
-    sub_ids = [s["id"] for s in subs]
-    rows: list[dict] = []
-    colspec = [("registration_number", "Registration Number"), ("full_name", "Full Name"),
-               ("email", "Email"), ("phone", "Phone"), ("college", "College"), ("prompt_text", "Prompt")]
-
-    if not sub_ids:
-        filename = "prompts__all_categories.csv"
-        if category:
-            filename = f"prompts__category_{category}.csv"
+    if not detail_map or not questions:
         return [], colspec, filename
 
-    # Gather per-submission responses with question number + evaluation score.
-    responses: list[dict] = []
-    for i in range(0, len(sub_ids), 100):
-        chunk = sub_ids[i : i + 100]
-        resp_rows = (
-            db()
-            .table("pc_responses")
-            .select(
-                "submission_id, question_id, prompt_text, "
-                "pc_evaluations(score), pc_questions(question_number)"
-            )
-            .in_("submission_id", chunk)
-            .execute()
-            .data
-            or []
-        )
-        responses.extend(resp_rows)
-    # Index submissions by id.
+    subs = _fetch_eq("pc_submissions", "id, participant_id", competition_id)
+    subs = [s for s in subs if s.get("participant_id") in detail_map]
     sub_by_id = {s["id"]: s for s in subs}
+    prompt_by_key: dict[tuple[str, str], str] = {}
+    sub_ids = [s["id"] for s in subs]
+    if sub_ids:
+        for response in _fetch_in(
+            "pc_responses",
+            "submission_id, question_id, prompt_text",
+            "submission_id",
+            sub_ids,
+        ):
+            submission = sub_by_id.get(response.get("submission_id"))
+            if not submission:
+                continue
+            participant_id = str(submission.get("participant_id") or "")
+            question_id = str(response.get("question_id") or "")
+            prompt_by_key[(participant_id, question_id)] = response.get("prompt_text") or ""
 
-    qnum_by_qid: dict[str, int] = {}
-    for r in responses:
-        q = r.get("pc_questions") or {}
-        qn = q.get("question_number")
-        if qn is not None:
-            qnum_by_qid[r["question_id"]] = int(qn)
+    question_items = sorted(
+        questions.items(),
+        key=lambda item: int(item[1].get("number") or 0),
+    )
+    rows: list[dict] = []
+    for participant_id, details in detail_map.items():
+        for question_id, question in question_items:
+            number = int(question.get("number") or 0)
+            if category is not None and number != category:
+                continue
+            title = question.get("title") or CATEGORY_TITLES.get(number, "")
+            prompt_text = prompt_by_key.get((participant_id, question_id), "")
+            if not str(prompt_text).strip():
+                continue
+            rows.append(
+                {
+                    "registration_number": details.get("registration_number") or "",
+                    "display_name": details.get("display_name") or "",
+                    "category": number,
+                    "category_title": title,
+                    "prompt_text": prompt_text,
+                }
+            )
 
-    for r in responses:
-        s = sub_by_id.get(r.get("submission_id"))
-        if not s:
-            continue
-        pid = s.get("participant_id")
-        qn = qnum_by_qid.get(r.get("question_id"))
-        if category is not None and qn != category:
-            continue
-        details = detail_map.get(pid, {})
-        evs = r.get("pc_evaluations") or []
-        score = None
-        if evs:
-            score = evs[0].get("score")
-        rows.append(
-            {
-                "registration_number": details.get("registration_number"),
-                "full_name": details.get("full_name"),
-                "email": details.get("email"),
-                "phone": details.get("phone"),
-                "college": details.get("college"),
-                "prompt_text": r.get("prompt_text", ""),
-                "category": qn,
-                "category_title": CATEGORY_TITLES.get(qn, ""),
-                "score": score,
-            }
-        )
-
-    filename = "prompts__all_categories.csv"
-    if category:
-        filename = f"prompts__category_{category}.csv"
-    # Group into a clean, sequential category-wise list.
     rows = order_export_blocks(rows)
     return rows, colspec, filename
 
 
 def build_export_csv(competition_id: str, category: int | None = None) -> tuple[bytes, list[tuple[str, str]], str]:
-    rows, _, filename = build_export(competition_id, category)
-    headers = [
-        "Registration Number",
-        "Full Name",
-        "Email",
-        "Phone",
-        "College",
-        "Category",
-        "Category Title",
-        "Score",
-        "Prompt",
-    ]
+    rows, colspec, filename = build_export(competition_id, category)
+    headers = [header for _, header in colspec]
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(headers)
-    for r in rows:
-        writer.writerow(
-            [
-                r.get("registration_number", ""),
-                r.get("full_name", ""),
-                r.get("email", ""),
-                r.get("phone", ""),
-                r.get("college", ""),
-                r.get("category", ""),
-                r.get("category_title", ""),
-                r.get("score", ""),
-                r.get("prompt_text", ""),
-            ]
-        )
-    return buf.getvalue().encode("utf-8-sig"), headers, filename
+    for row in rows:
+        writer.writerow([row.get(field, "") or "" for field, _ in colspec])
+    return buf.getvalue().encode("utf-8-sig"), colspec, filename

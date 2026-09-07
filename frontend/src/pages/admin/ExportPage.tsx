@@ -15,16 +15,31 @@ export default function ExportPage() {
 
   const open = (url: string) => {
     const token = getAdminToken()
+    setError('')
+    setNote('')
     fetch(`${API_BASE}${url}`, { headers: { Authorization: `Bearer ${token ?? ''}` } })
-      .then((res) => {
-        if (!res.ok) throw new Error('Export failed')
-        return res.blob()
+      .then(async (res) => {
+        if (!res.ok) {
+          let message = 'Export failed'
+          try {
+            const body = (await res.json()) as { detail?: string }
+            if (typeof body.detail === 'string') message = body.detail
+          } catch {
+            /* ignore */
+          }
+          throw new Error(message)
+        }
+        const header = res.headers.get('Content-Disposition') || ''
+        const match = /filename="([^"]+)"/.exec(header)
+        const filename = match?.[1] || 'prompts.csv'
+        const blob = await res.blob()
+        return { blob, filename }
       })
-      .then((blob) => {
+      .then(({ blob, filename }) => {
         const link = window.document.createElement('a')
         const objectUrl = window.URL.createObjectURL(blob)
         link.href = objectUrl
-        link.download = 'prompts.csv'
+        link.download = filename
         link.click()
         window.URL.revokeObjectURL(objectUrl)
         setNote('Download started.')
@@ -37,7 +52,7 @@ export default function ExportPage() {
       <PageHeader
         kicker={testMode ? 'Test dataset' : 'Live data'}
         title="Export"
-        description="Category-wise CSV of prompts. Scoped to the current Live / Test mode."
+        description="CSV of submitted prompts: event registration number, name, category, prompt. Walk-in test accounts are omitted."
       />
       <Banner message={error} onDismiss={() => setError('')} />
       <Banner message={note} onDismiss={() => setNote('')} tone="note" />

@@ -177,7 +177,7 @@ export default function ReviewPage() {
   return (
     <PageShell>
       <section className="container py-12 md:py-16">
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto min-w-0 max-w-2xl">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
               Review
             </p>
@@ -239,7 +239,7 @@ export default function ReviewPage() {
                     isSubmitted ? 'opacity-70' : '',
                   )}
                 >
-                  <CardContent className="pt-6">
+                  <CardContent className="min-w-0 pt-6">
                     <div className="mb-2 flex items-center justify-between gap-3">
                       <h2 className="font-medium">
                         <span className="mr-2 text-muted-foreground">{idx + 1}.</span>
@@ -258,7 +258,7 @@ export default function ReviewPage() {
                     ) : q.description ? (
                       <p className="mb-3 text-sm text-muted-foreground">{q.description}</p>
                     ) : null}
-                    <p className="whitespace-pre-wrap rounded-md bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
+                    <p className="min-w-0 overflow-hidden break-words whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md bg-muted/40 p-4 text-sm leading-relaxed text-foreground">
                       {text || <span className="italic text-muted-foreground">(empty)</span>}
                     </p>
                     {!inRange && !isSubmitting ? (

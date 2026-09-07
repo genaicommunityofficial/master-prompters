@@ -279,7 +279,7 @@ function Shell({
         Skip to content
       </a>
       {header}
-      <main id="main" className="flex-1">
+      <main id="main" className="min-w-0 flex-1">
         {children}
       </main>
       <footer className="border-t border-border/60 py-8">

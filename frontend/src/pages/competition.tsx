@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, ArrowRight, Save, Check } from 'lucide-react'
+import { AlertCircle, ArrowRight } from 'lucide-react'
 import { PageShell } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -34,7 +34,6 @@ export default function CompetitionPage() {
   const [questions, setQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState<Draft>({})
-  const [savedFlash, setSavedFlash] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -132,17 +131,12 @@ export default function CompetitionPage() {
     return promptLimitCopy(first?.min_length, first?.max_length)
   }, [questions])
 
-  const handleSaveFlash = () => {
-    setSavedFlash(true)
-    window.setTimeout(() => setSavedFlash(false), 1500)
-  }
-
   if (loading) return <PageShell><FullScreenLoader label="Loading competition" /></PageShell>
 
   return (
     <PageShell>
       <section className="container py-12 md:py-16">
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto min-w-0 max-w-2xl">
           <div className="mb-8">
             <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
               {COMPETITION_NAME}
@@ -170,7 +164,7 @@ export default function CompetitionPage() {
                   key={q.id}
                   className={cn(met ? 'ring-1 ring-foreground/15' : '')}
                 >
-                  <CardContent className="space-y-3 pt-6">
+                  <CardContent className="min-w-0 space-y-3 pt-6">
                     <div className="flex items-baseline justify-between gap-3">
                       <Label htmlFor={q.id} className="text-base">
                         <span className="mr-2 text-muted-foreground">{idx + 1}.</span>
@@ -191,6 +185,7 @@ export default function CompetitionPage() {
                       rows={6}
                       maxLength={q.max_length}
                       placeholder=""
+                      className="overflow-x-hidden break-words [overflow-wrap:anywhere]"
                       onChange={(e) => setAnswer(q.id, e.target.value)}
                     />
                     <div className="flex items-center justify-between text-xs">
@@ -210,11 +205,7 @@ export default function CompetitionPage() {
             })}
           </div>
 
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Button variant="ghost" onClick={handleSaveFlash}>
-              {savedFlash ? 'Saved' : 'Save draft'}
-              {savedFlash ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-            </Button>
+          <div className="mt-8 flex justify-end">
             <Button
               size="lg"
               onClick={() => nav('/competition/review')}
