@@ -77,7 +77,7 @@ async function request<T>(
     headers.set('Content-Type', 'application/json')
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers })
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, cache: 'no-store' })
   if (!res.ok) {
     let message = 'Something went wrong. Please try again.'
     try {
@@ -215,7 +215,7 @@ export const api = {
     ),
   adminParticipants: (competitionId: string, token?: string) =>
     request<ParticipantRoster>(
-      withComp('/admin/participants', competitionId),
+      withComp('/admin/participants', competitionId, { t: Date.now() }),
       {},
       token ?? getAdminToken(),
     ),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel
 
 from app.security.auth import get_current_admin
@@ -430,10 +430,13 @@ class RegistrationCreateRequest(BaseModel):
 
 @router.get("/participants")
 def list_participants(
+    response: Response,
     competition_id: str | None = Query(default=None),
+    _cache_bust: int | None = Query(default=None, alias="t", include_in_schema=False),
     payload: dict = Depends(require_admin),
 ) -> dict:
     """Event registrations (read-only) merged with admin-added pc_participants."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     cid = _scoped_competition(payload, competition_id)
     try:
         return admin_registration_service.list_roster(cid)

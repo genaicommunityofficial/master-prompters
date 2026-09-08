@@ -24,11 +24,13 @@ export default function ParticipantsPage() {
   const [adding, setAdding] = useState(false)
   const [pendingDrop, setPendingDrop] = useState<string | null>(null)
   const [droppingId, setDroppingId] = useState<string | null>(null)
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
 
   const load = useCallback(async () => {
     setBusy(true)
     try {
       setRoster(await api.adminParticipants(competitionId, token))
+      setUpdatedAt(new Date())
       setError('')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load participants.')
@@ -115,20 +117,30 @@ export default function ParticipantsPage() {
       <Banner message={error} onDismiss={() => setError('')} />
       <Banner message={note} onDismiss={() => setNote('')} tone="note" />
 
-      <div className="flex justify-end">
-        <Button size="sm" variant="outline" onClick={() => void load()} disabled={busy}>
-          {busy ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />} Refresh
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {roster ? (
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {roster.registered} listed
+            {showLogin ? ` · ${roster.logged_in ?? 0} logged in` : ''}
+            {' · '}
+            {roster.submitted} submitted
+            {updatedAt ? ` · updated ${updatedAt.toLocaleTimeString()}` : ''}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">Loading live list…</p>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void load()}
+          disabled={busy}
+          aria-label="Refresh participant list from the live database"
+        >
+          {busy ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh list
         </Button>
       </div>
-
-      {roster ? (
-        <p className="text-sm text-muted-foreground">
-          {roster.registered} listed
-          {showLogin ? ` · ${roster.logged_in ?? 0} logged in` : ''}
-          {' · '}
-          {roster.submitted} submitted
-        </p>
-      ) : null}
 
       {testMode ? null : (
         <Card>
