@@ -98,7 +98,9 @@ class TestEvalProgress:
             if name == "pc_competitions":
                 return _Table(_row([{"status": "OPEN", "leaderboard_visible": False}]))
             if name == "pc_participants":
-                return _Table(_row([], count=0))
+                return _Table(_row([
+                    {"id": "p1", "status": "SUBMITTED", "registration_number": "23BCE0001", "is_pipeline_tester": False},
+                ], count=1))
             if name == "pc_submissions":
                 return _Table(_row([
                     {"id": "s1", "status": "SUBMITTED", "total_score": None, "participant_id": "p1"},
@@ -141,6 +143,67 @@ class TestEvalProgress:
         assert out["per_category"]["q1"]["evaluated"] == 1
         assert out["cost"]["total_evaluations"] == 1
         assert out["run"] is not None
+
+    @patch("app.services.eval_status_service.db")
+    @patch("app.db.db")
+    @patch("app.services.eval_status_service.run_svc.get_status")
+    def test_progress_excludes_pipeline_tester(self, mock_status, mock_db_db, mock_db):
+        mock_status.return_value = {"status": "idle"}
+        store = MagicMock()
+
+        def fake_table(name):
+            if name == "pc_competitions":
+                return _Table(_row([{"status": "OPEN", "leaderboard_visible": True}]))
+            if name == "pc_participants":
+                return _Table(_row([
+                    {
+                        "id": "p-tester",
+                        "status": "SUBMITTED",
+                        "registration_number": "abhinavkumarsaksena",
+                        "is_pipeline_tester": False,
+                    },
+                    {
+                        "id": "p-real",
+                        "status": "REGISTERED",
+                        "registration_number": "25BMR10015",
+                        "is_pipeline_tester": False,
+                    },
+                ], count=2))
+            if name == "pc_submissions":
+                return _Table(_row([
+                    {"id": "s-tester", "status": "COMPLETED", "total_score": 0.0, "participant_id": "p-tester"},
+                ]))
+            if name == "pc_responses":
+                return _Table(_row([
+                    {"id": "r1", "question_id": "q1"},
+                    {"id": "r2", "question_id": "q1"},
+                    {"id": "r3", "question_id": "q1"},
+                    {"id": "r4", "question_id": "q1"},
+                    {"id": "r5", "question_id": "q1"},
+                ]))
+            if name == "pc_evaluation_jobs":
+                return _Table(_row([{"status": "COMPLETED", "last_error": None, "attempt_count": 1, "response_id": "r1"}]))
+            if name == "pc_evaluations":
+                return _Table(_row([
+                    {"response_id": rid, "score": 0.0, "model": "gemini-3.6-flash",
+                     "input_tokens": 1, "output_tokens": 1, "thinking_tokens": 0,
+                     "estimated_cost_usd": 0}
+                    for rid in ("r1", "r2", "r3", "r4", "r5")
+                ]))
+            if name == "pc_questions":
+                return _Table(_row([{"id": "q1", "question_number": 1, "title": "Meme"}]))
+            raise AssertionError(f"unexpected table {name}")
+
+        store.table.side_effect = fake_table
+        mock_db.return_value = store
+        mock_db_db.return_value = store
+
+        from app.services.eval_status_service import get_eval_progress
+        out = get_eval_progress("c1")
+        assert out["totals"]["evaluated"] == 0
+        assert out["totals"]["responses"] == 0
+        assert out["totals"]["submitted"] == 0
+        assert out["per_category"]["q1"]["evaluated"] == 0
 
 
 class TestParticipationFunnel:

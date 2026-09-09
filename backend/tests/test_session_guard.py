@@ -55,6 +55,17 @@ def test_legacy_row_without_expiry_is_not_locked():
     )
 
 
+def test_session_is_active_false_after_logout():
+    from app.services.session_guard import session_is_active
+
+    now = datetime(2026, 9, 6, tzinfo=timezone.utc)
+    assert session_is_active(
+        _participant(session_token_hash=None, session_expires_at=None),
+        now=now,
+    ) is False
+    assert session_is_active(_participant(), now=now) is True
+
+
 def test_frozen_prompt_insert_keep_reject():
     assert frozen_prompt_action(None, "hello") == "insert"
     assert frozen_prompt_action("hello", "hello") == "keep"

@@ -30,6 +30,19 @@ def parse_timestamptz(value: object) -> datetime | None:
     return ts.astimezone(timezone.utc)
 
 
+def session_is_active(participant: dict | None, *, now: datetime | None = None) -> bool:
+    """True while a participant has a live session (cleared on sign-out or expiry)."""
+    if not participant or not participant.get("session_token_hash"):
+        return False
+    expires = parse_timestamptz(participant.get("session_expires_at"))
+    if expires is None:
+        return False
+    clock = now or datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    return expires > clock.astimezone(timezone.utc)
+
+
 def session_blocks_new_login(
     participant: dict,
     submission_status: str | None,
@@ -43,15 +56,7 @@ def session_blocks_new_login(
         return False
     if participant.get("status") == "SUBMITTED":
         return False
-    if not participant.get("session_token_hash"):
-        return False
-    expires = parse_timestamptz(participant.get("session_expires_at"))
-    if expires is None:
-        return False
-    clock = now or datetime.now(timezone.utc)
-    if clock.tzinfo is None:
-        clock = clock.replace(tzinfo=timezone.utc)
-    return expires > clock.astimezone(timezone.utc)
+    return session_is_active(participant, now=now)
 
 
 def session_expiry_iso(*, now: datetime | None = None) -> str:

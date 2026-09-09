@@ -416,6 +416,8 @@ class TestRoster:
             registration_number="23BCE0001",
             login_count=2,
             last_login_at="2026-01-02T00:00:00Z",
+            session_token_hash="live-session",
+            session_expires_at="2099-01-01T00:00:00+00:00",
         )
         tester = _participant(is_pipeline_tester=True, registration_number="abhinavkumarsaksena")
         extra = _participant(
@@ -450,6 +452,46 @@ class TestRoster:
         assert event_row["source"] == "event"
         added = next(r for r in out["participants"] if r["source"] == "added")
         assert added["logged_in"] is False
+        assert out["logged_in"] == 1
+
+    @patch("app.services.admin_registration_service.fetch_all")
+    @patch("app.services.admin_registration_service.db")
+    def test_live_roster_logout_clears_logged_in(self, mock_db, mock_fetch):
+        """login_count stays after sign-out; dashboard must use the live session, not history."""
+        store = MagicMock()
+        mock_db.return_value = store
+        store.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+            {"qr_event_id": "evt"}
+        ]
+        event_id = str(uuid.uuid4())
+        signed_out = _participant(
+            registration_id=event_id,
+            registration_number="25BMR10015",
+            display_name="RABHYA GROVER",
+            login_count=2,
+            last_login_at="2026-09-09T16:58:32Z",
+            session_token_hash=None,
+            session_expires_at=None,
+        )
+
+        def fake_fetch(table, select, eq=None, order=None, descending=False):
+            if table == "pc_participants":
+                return [signed_out]
+            if table == "pc_submissions":
+                return []
+            if table == "registrations":
+                return [{
+                    "id": event_id,
+                    "full_name": "RABHYA GROVER",
+                    "vit_registration_number": "25BMR10015",
+                }]
+            return []
+
+        mock_fetch.side_effect = fake_fetch
+        out = admin_registration_service.list_roster("competition_2026")
+        row = next(r for r in out["participants"] if r["registration_number"] == "25BMR10015")
+        assert row["logged_in"] is False
+        assert out["logged_in"] == 0
 
     @patch("app.services.admin_registration_service.fetch_all")
     @patch("app.services.admin_registration_service.db")

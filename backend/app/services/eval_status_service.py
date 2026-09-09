@@ -66,6 +66,40 @@ def _questions_by_id(competition_id: str) -> dict[str, dict]:
     return {q["id"]: q for q in rows}
 
 
+def _visible_participant_ids(store, competition_id: str) -> set[str]:
+    """Participant ids that should appear on admin eval totals (no testers / dropped)."""
+    from app.services.admin_registration_service import _is_tester
+
+    try:
+        rows = (
+            store.table("pc_participants")
+            .select("id, status, registration_number, is_pipeline_tester")
+            .eq("competition_id", competition_id)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:  # noqa: BLE001
+        rows = (
+            store.table("pc_participants")
+            .select("id, status, registration_number")
+            .eq("competition_id", competition_id)
+            .execute()
+            .data
+            or []
+        )
+    kept: set[str] = set()
+    for row in rows:
+        if str(row.get("status") or "").upper() == "DISQUALIFIED":
+            continue
+        if _is_tester(row):
+            continue
+        pid = row.get("id")
+        if pid:
+            kept.add(pid)
+    return kept
+
+
 def get_eval_progress(competition_id: str) -> dict[str, Any]:
     """Aggregate eval pipeline state for one competition in ~7 queries."""
     store = db()
@@ -82,13 +116,8 @@ def get_eval_progress(competition_id: str) -> dict[str, Any]:
     comp_status = comp[0].get("status") if comp else None
     leaderboard_visible = bool(comp[0].get("leaderboard_visible")) if comp else False
 
-    participants = (
-        store.table("pc_participants")
-        .select("id", head=True, count="exact")
-        .eq("competition_id", competition_id)
-        .execute()
-    )
-    total_participants = participants.count if hasattr(participants, "count") and participants.count is not None else 0
+    kept_ids = _visible_participant_ids(store, competition_id)
+    total_participants = len(kept_ids)
 
     submissions = (
         store.table("pc_submissions")
@@ -98,6 +127,7 @@ def get_eval_progress(competition_id: str) -> dict[str, Any]:
         .data
         or []
     )
+    submissions = [s for s in submissions if s.get("participant_id") in kept_ids]
 
     sub_ids = [s["id"] for s in submissions]
     responses: list[dict] = []

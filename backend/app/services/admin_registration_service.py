@@ -12,6 +12,7 @@ from typing import Any
 
 from app.config import settings
 from app.db import db, fetch_all
+from app.services.session_guard import session_is_active
 
 TEST_COMPETITION_ID = "competition_test"
 MANUAL_QR_PREFIX = "GENAI_QR_MANUAL_"
@@ -57,40 +58,37 @@ def _is_dropped(row: dict[str, Any] | None) -> bool:
     return str(row.get("status") or "").upper() == DROPPED_STATUS
 
 
-_HAS_TESTER_COL: bool | None = None
-
-
-def _participant_select() -> str:
-    base = (
-        "id, competition_id, registration_id, registration_number, qr_token, "
-        "display_name, email, status, login_count, last_login_at, created_at"
-    )
-    if _HAS_TESTER_COL is False:
-        return base
-    return base + ", is_pipeline_tester"
+_PARTICIPANT_SELECTS = (
+    "id, competition_id, registration_id, registration_number, qr_token, "
+    "display_name, email, status, login_count, last_login_at, created_at, "
+    "is_pipeline_tester, session_token_hash, session_expires_at",
+    "id, competition_id, registration_id, registration_number, qr_token, "
+    "display_name, email, status, login_count, last_login_at, created_at, "
+    "session_token_hash, session_expires_at",
+    "id, competition_id, registration_id, registration_number, qr_token, "
+    "display_name, email, status, login_count, last_login_at, created_at, "
+    "is_pipeline_tester",
+    "id, competition_id, registration_id, registration_number, qr_token, "
+    "display_name, email, status, login_count, last_login_at, created_at",
+)
 
 
 def _load_participants(competition_id: str) -> list[dict[str, Any]]:
-    global _HAS_TESTER_COL
-    try:
-        rows = fetch_all(
-            "pc_participants",
-            _participant_select(),
-            eq={"competition_id": competition_id},
-            order="created_at",
-            descending=True,
-        )
-        _HAS_TESTER_COL = True
-        return rows
-    except Exception:  # noqa: BLE001
-        _HAS_TESTER_COL = False
-        return fetch_all(
-            "pc_participants",
-            _participant_select(),
-            eq={"competition_id": competition_id},
-            order="created_at",
-            descending=True,
-        )
+    last_exc: Exception | None = None
+    for select in _PARTICIPANT_SELECTS:
+        try:
+            return fetch_all(
+                "pc_participants",
+                select,
+                eq={"competition_id": competition_id},
+                order="created_at",
+                descending=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+    if last_exc:
+        raise last_exc
+    return []
 
 
 def _load_submissions(competition_id: str) -> dict[str, dict[str, Any]]:
@@ -206,14 +204,13 @@ def list_roster(competition_id: str) -> dict[str, Any]:
             if p:
                 matched_ids.add(p["id"])
             sub = subs.get(p["id"]) if p else None
-            login_count = int((p or {}).get("login_count") or 0)
             rows.append(
                 _row(
                     id=(p["id"] if p else f"reg:{reg.get('id')}"),
                     registration_number=number,
                     display_name=_reg_name(reg) or (p.get("display_name") if p else None),
                     source="event",
-                    logged_in=login_count > 0,
+                    logged_in=session_is_active(p) if p else False,
                     last_login_at=(p.get("last_login_at") if p else None),
                     submitted=sub is not None,
                     submission_status=sub.get("status") if sub else None,
@@ -223,7 +220,6 @@ def list_roster(competition_id: str) -> dict[str, Any]:
             if p["id"] in matched_ids:
                 continue
             sub = subs.get(p["id"])
-            login_count = int(p.get("login_count") or 0)
             added = _is_manual(p) or bool(normalize_reg(p.get("registration_number")))
             rows.append(
                 _row(
@@ -231,7 +227,7 @@ def list_roster(competition_id: str) -> dict[str, Any]:
                     registration_number=p.get("registration_number"),
                     display_name=p.get("display_name"),
                     source="added" if added else "event",
-                    logged_in=login_count > 0,
+                    logged_in=session_is_active(p),
                     last_login_at=p.get("last_login_at"),
                     submitted=sub is not None,
                     submission_status=sub.get("status") if sub else None,
