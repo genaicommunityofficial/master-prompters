@@ -70,7 +70,7 @@ class RegistrationNumberLoginRequest(BaseModel):
 
 @router.post("/login/registration-number", response_model=LoginPrepareResponse)
 async def registration_number_login(body: RegistrationNumberLoginRequest) -> LoginPrepareResponse:
-    """Look up a registration number. Testers / admin extras sign in immediately."""
+    """Sign in with a registration number. Issues a session immediately."""
     if not body.registration_number.strip():
         raise HTTPException(status_code=400, detail="Registration number is required.")
     try:

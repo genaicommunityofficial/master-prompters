@@ -79,7 +79,30 @@ class TestRegistrationNumberLogin:
             login_with_registration_number("23BCE0001", "competition_2026")
 
     @patch("app.services.auth_service.db")
-    def test_event_registrant_requires_qr(self, mock_db):
+    def test_event_qr_participant_logs_in_with_registration_number(self, mock_db):
+        store = MagicMock()
+        mock_db.return_value = store
+        comp = MagicMock()
+        comp.data = [{"status": "OPEN", "qr_event_id": None}]
+        part = MagicMock()
+        part.data = [_participant(is_pipeline_tester=False, qr_token="GENAI_QR_EVENT_ADA")]
+        nosub = MagicMock()
+        nosub.data = []
+
+        store.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = comp
+        store.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.side_effect = [
+            part,
+            nosub,
+        ]
+
+        result = login_with_registration_number("23BCE0001", "competition_2026")
+        assert result["requires_qr"] is False
+        assert result["token"]
+        assert result["participant"]["display_name"] == "Ada Lovelace"
+
+    @patch("app.services.auth_service.ensure_participant")
+    @patch("app.services.auth_service.db")
+    def test_event_registrant_logs_in_without_qr(self, mock_db, mock_ensure):
         store = MagicMock()
         mock_db.return_value = store
         comp = MagicMock()
@@ -87,14 +110,29 @@ class TestRegistrationNumberLogin:
         nobody = MagicMock()
         nobody.data = []
         event_reg = MagicMock()
-        event_reg.data = [{"full_name": "Ada", "vit_registration_number": "23BCE0001", "event_id": "evt"}]
+        event_row = {
+            "id": str(uuid.uuid4()),
+            "full_name": "Ada",
+            "vit_registration_number": "23BCE0001",
+            "event_id": "evt",
+            "qr_token": "GENAI_QR_EVENT_ADA",
+            "registration_status": "verified",
+        }
+        event_reg.data = [event_row]
+        created = _participant(qr_token="GENAI_QR_EVENT_ADA", is_pipeline_tester=False)
+        mock_ensure.return_value = created
+        nosub = MagicMock()
+        nosub.data = []
 
         def table(name):
             t = MagicMock()
             if name == "pc_competitions":
                 t.select.return_value.eq.return_value.limit.return_value.execute.return_value = comp
             elif name == "pc_participants":
-                t.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = nobody
+                t.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.side_effect = [
+                    nobody,
+                    nosub,
+                ]
                 t.select.return_value.eq.return_value.execute.return_value = nobody
             else:
                 t.select.return_value.ilike.return_value.eq.return_value.limit.return_value.execute.return_value = event_reg
@@ -102,8 +140,10 @@ class TestRegistrationNumberLogin:
 
         store.table.side_effect = table
         result = login_with_registration_number("23BCE0001", "competition_2026")
-        assert result["requires_qr"] is True
-        assert result["token"] is None
+        assert result["requires_qr"] is False
+        assert result["token"]
+        mock_ensure.assert_called_once()
+        assert mock_ensure.call_args.args[1]["qr_token"] == "GENAI_QR_EVENT_ADA"
 
     @patch("app.services.auth_service.settings")
     @patch("app.services.auth_service.db")

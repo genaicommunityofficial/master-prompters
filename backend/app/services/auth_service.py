@@ -310,21 +310,15 @@ def _find_event_registration(registration_number: str, competition_id: str) -> d
     return None
 
 
-def _can_skip_qr(participant: dict) -> bool:
-    if participant.get("is_pipeline_tester"):
+def _event_registration_verified(reg: dict) -> bool:
+    status = str(reg.get("registration_status") or "").strip().lower()
+    if not status:
         return True
-    if normalize_reg(participant.get("registration_number")).casefold() == "abhinavkumarsaksena":
-        return True
-    token = str(participant.get("qr_token") or "")
-    return token.startswith(MANUAL_QR_PREFIX)
+    return status in ("verified", "confirmed", "approved")
 
 
 def login_with_registration_number(registration_number: str, competition_id: str) -> dict:
-    """Step 1 of participant login.
-
-    Pipeline testers and admin-added extras sign in with the number alone.
-    Event registrants must continue with a matching QR code.
-    """
+    """Sign in with a registration number. No QR step."""
     _ensure_competition_open(competition_id)
     needle = normalize_reg(registration_number)
     if not needle:
@@ -332,32 +326,24 @@ def login_with_registration_number(registration_number: str, competition_id: str
 
     participant = _find_participant_by_reg(competition_id, needle)
     if participant:
-        _ensure_not_dropped(participant)
-    if participant and _can_skip_qr(participant):
         return _issue_session(
             competition_id,
             participant,
             registration_number=participant.get("registration_number") or needle,
         )
 
-    if participant:
-        return {
-            "requires_qr": True,
-            "token": None,
-            "participant": None,
-            "display_name": participant.get("display_name"),
-        }
-
     reg = _find_event_registration(needle, competition_id)
     if not reg:
         raise AuthError("This registration number is not registered for this event.")
+    if not _event_registration_verified(reg):
+        raise AuthError("Registration is not verified yet")
 
-    return {
-        "requires_qr": True,
-        "token": None,
-        "participant": None,
-        "display_name": reg.get("full_name") or reg.get("name"),
-    }
+    participant = ensure_participant(competition_id, reg)
+    return _issue_session(
+        competition_id,
+        participant,
+        registration_number=_registration_number_from(reg) or needle,
+    )
 
 
 def login_with_qr_message(
