@@ -4,24 +4,25 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 7%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 7%;
-    --muted: 240 6% 96%;
-    --muted-foreground: 240 4% 42%;
-    --secondary: 240 6% 96%;
-    --secondary-foreground: 240 10% 12%;
-    --accent: 240 6% 94%;
-    --accent-foreground: 240 10% 10%;
-    --border: 240 6% 90%;
-    --input: 240 6% 88%;
-    --ring: 240 10% 20%;
-    --primary: 240 10% 7%;
-    --primary-foreground: 0 0% 100%;
+    --background: 40 18% 96%;
+    --foreground: 230 14% 8%;
+    --card: 40 24% 99%;
+    --card-foreground: 230 14% 8%;
+    --muted: 36 14% 93%;
+    --muted-foreground: 230 8% 34%;
+    --secondary: 36 12% 92%;
+    --secondary-foreground: 230 12% 12%;
+    --accent: 36 16% 91%;
+    --accent-foreground: 230 12% 10%;
+    --border: 32 12% 84%;
+    --input: 32 10% 80%;
+    --ring: 38 32% 32%;
+    --primary: 230 14% 8%;
+    --primary-foreground: 40 24% 98%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --radius: 0.75rem;
+    --mark: 36 58% 32%;
+    --radius: 0.5rem;
   }
 
   .dark {
@@ -37,11 +38,12 @@
     --accent-foreground: 240 10% 96%;
     --border: 240 8% 20%;
     --input: 240 8% 22%;
-    --ring: 240 8% 60%;
-    --primary: 240 10% 96%;
-    --primary-foreground: 240 12% 8%;
+    --ring: 38 28% 48%;
+    --primary: 40 20% 96%;
+    --primary-foreground: 230 12% 8%;
     --destructive: 0 70% 55%;
     --destructive-foreground: 0 0% 100%;
+    --mark: 38 42% 62%;
   }
 }
 
@@ -56,6 +58,11 @@
       'cv11',
       'ss01';
     text-rendering: optimizeLegibility;
+    background-image: radial-gradient(
+      ellipse 90% 42% at 50% -8%,
+      hsl(38 48% 62% / 0.16),
+      transparent 58%
+    );
   }
   html {
     scroll-behavior: smooth;
@@ -135,6 +142,21 @@
   }
   .tap-highlight-none {
     -webkit-tap-highlight-color: transparent;
+  }
+  .text-mark {
+    color: hsl(var(--mark));
+  }
+  .bg-mark {
+    background-color: hsl(var(--mark));
+  }
+  .border-mark {
+    border-color: hsl(var(--mark));
+  }
+  .border-mark\/30 {
+    border-color: hsl(var(--mark) / 0.3);
+  }
+  .ring-mark\/40 {
+    --tw-ring-color: hsl(var(--mark) / 0.4);
   }
   .animation-delay-100 { animation-delay: 100ms; }
   .animation-delay-200 { animation-delay: 200ms; }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, ArrowRight } from 'lucide-react'
 import { PageShell } from '@/components/layout'
+import { LatentField } from '@/components/latent-field'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -136,10 +137,14 @@ export default function CompetitionPage() {
       <section className="container py-12 md:py-16">
         <div className="mx-auto min-w-0 max-w-2xl">
           <div className="mb-8">
-            <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-mark">
+              Live round
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
               {COMPETITION_NAME}
             </h1>
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            <LatentField rows={2} cols={22} className="mt-4" />
+            <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
               Five categories. Each prompt must be {limitsLabel}. Write a complete instruction
               for that category, then continue to review.
             </p>
@@ -165,7 +170,7 @@ export default function CompetitionPage() {
                   <CardContent className="min-w-0 space-y-3 pt-6">
                     <div className="flex items-baseline justify-between gap-3">
                       <Label htmlFor={q.id} className="text-base">
-                        <span className="mr-2 text-muted-foreground">{idx + 1}.</span>
+                        <span className="mr-2 text-mark">{idx + 1}.</span>
                         {q.title}
                       </Label>
                       <span className="text-xs text-muted-foreground tabular-nums">
@@ -183,7 +188,7 @@ export default function CompetitionPage() {
                       rows={6}
                       maxLength={PROMPT_MAX_CHARS}
                       placeholder=""
-                      className="overflow-x-hidden break-words [overflow-wrap:anywhere]"
+                      className="overflow-x-hidden break-words [overflow-wrap:anywhere] focus-visible:ring-mark/40"
                       onChange={(e) => setAnswer(q.id, e.target.value)}
                     />
                     <div className="flex items-center justify-between text-xs">

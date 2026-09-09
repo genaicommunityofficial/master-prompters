@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { PageShell } from '@/components/layout'
+import { LatentField } from '@/components/latent-field'
 import QrLogin from '@/components/qr-login'
 import { TypeHeadline } from '@/components/type-line'
 import { Button } from '@/components/ui/button'
@@ -65,16 +66,18 @@ export default function LandingPage() {
       ) : null}
 
       <section className="border-b border-border">
-        <div className="container py-16 md:py-24">
+        <div className="container grid items-end gap-10 py-16 md:grid-cols-[minmax(0,1fr)_10.5rem] md:py-24">
           <div className="max-w-2xl">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-mark">
               {COMMUNITY_LINE}
             </p>
             <TypeHeadline
               className="mt-4 font-pixel text-[clamp(1.35rem,5.2vw,2.75rem)] font-medium leading-none tracking-[0.06em]"
               text={COMPETITION_NAME}
             />
+            <span className="mt-4 block h-px w-16 bg-mark" aria-hidden="true" />
             <p className="mt-5 text-[15px] text-muted-foreground">{CLUB_TAGLINE}</p>
+            <p className="mt-2 text-sm text-foreground/80">Five prompts. One sitting.</p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Button
                 size="lg"
@@ -97,7 +100,9 @@ export default function LandingPage() {
                 <Link to="/leaderboard">Results</Link>
               </Button>
             </div>
+            <LatentField rows={3} cols={16} className="mt-8 md:hidden" />
           </div>
+          <LatentField rows={10} cols={12} className="hidden justify-self-end pb-1 md:grid" />
         </div>
       </section>
 
@@ -112,7 +117,7 @@ export default function LandingPage() {
           <ol className="mt-8 divide-y divide-border border-y border-border">
             {CATEGORIES.map((c) => (
               <li key={c.n} className="grid gap-2 py-5 sm:grid-cols-[2.25rem_minmax(0,16rem)_1fr] sm:gap-6">
-                <span className="text-xs tabular-nums text-muted-foreground">
+                <span className="text-xs tabular-nums text-mark">
                   {String(c.n).padStart(2, '0')}
                 </span>
                 <h3 className="text-sm font-medium leading-snug">{c.title}</h3>
