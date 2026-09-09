@@ -13,6 +13,7 @@ import type { Question } from '@/types'
 import { briefForQuestion } from '@/lib/categories'
 import { COMPETITION_NAME } from '@/lib/brand'
 import {
+  PROMPT_MAX_CHARS,
   isWithinPromptLimits,
   promptCharCount,
   promptLengthHint,
@@ -103,8 +104,8 @@ export default function CompetitionPage() {
       const next = { ...current }
       for (const q of questions) {
         const value = next[q.id]
-        if (typeof value === 'string' && value.length > q.max_length) {
-          next[q.id] = value.slice(0, q.max_length)
+        if (typeof value === 'string' && value.length > PROMPT_MAX_CHARS) {
+          next[q.id] = value.slice(0, PROMPT_MAX_CHARS)
           changed = true
         }
       }
@@ -116,20 +117,17 @@ export default function CompetitionPage() {
 
   const setAnswer = (id: string, value: string) => {
     const question = questions.find((item) => item.id === id)
-    persist({ ...draft, [id]: question ? value.slice(0, question.max_length) : value })
+    persist({ ...draft, [id]: question ? value.slice(0, PROMPT_MAX_CHARS) : value })
   }
 
   const allValid = useMemo(
     () =>
       questions.length === 5 &&
-      questions.every((q) => isWithinPromptLimits(draft[q.id] ?? '', q.min_length, q.max_length)),
+      questions.every((q) => isWithinPromptLimits(draft[q.id] ?? '')),
     [questions, draft],
   )
 
-  const limitsLabel = useMemo(() => {
-    const first = questions[0]
-    return promptLimitCopy(first?.min_length, first?.max_length)
-  }, [questions])
+  const limitsLabel = promptLimitCopy()
 
   if (loading) return <PageShell><FullScreenLoader label="Loading competition" /></PageShell>
 
@@ -157,7 +155,7 @@ export default function CompetitionPage() {
             {questions.map((q, idx) => {
               const value = draft[q.id] ?? ''
               const len = promptCharCount(value)
-              const met = isWithinPromptLimits(value, q.min_length, q.max_length)
+              const met = isWithinPromptLimits(value)
               const brief = briefForQuestion(q.title, q.question_number)
               return (
                 <Card
@@ -171,7 +169,7 @@ export default function CompetitionPage() {
                         {q.title}
                       </Label>
                       <span className="text-xs text-muted-foreground tabular-nums">
-                        {len} / {q.max_length}
+                        {len} / {PROMPT_MAX_CHARS}
                       </span>
                     </div>
                     {brief ? (
@@ -183,7 +181,7 @@ export default function CompetitionPage() {
                       id={q.id}
                       value={value}
                       rows={6}
-                      maxLength={q.max_length}
+                      maxLength={PROMPT_MAX_CHARS}
                       placeholder=""
                       className="overflow-x-hidden break-words [overflow-wrap:anywhere]"
                       onChange={(e) => setAnswer(q.id, e.target.value)}
@@ -196,7 +194,7 @@ export default function CompetitionPage() {
                           met ? 'text-primary' : 'text-muted-foreground',
                         )}
                       >
-                        {promptLengthHint(len, q.min_length, q.max_length)}
+                        {promptLengthHint(len)}
                       </span>
                     </div>
                   </CardContent>

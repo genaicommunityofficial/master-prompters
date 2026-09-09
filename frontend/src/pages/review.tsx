@@ -10,6 +10,8 @@ import { useSession } from '@/store/session'
 import type { Question } from '@/types'
 import { briefForQuestion } from '@/lib/categories'
 import {
+  PROMPT_MAX_CHARS,
+  PROMPT_MIN_CHARS,
   isWithinPromptLimits,
   promptCharCount,
   promptLimitCopy,
@@ -75,14 +77,11 @@ export default function ReviewPage() {
   const allReady = useMemo(
     () =>
       questions.length === 5 &&
-      questions.every((q) => isWithinPromptLimits(draft[q.id] ?? '', q.min_length, q.max_length)),
+      questions.every((q) => isWithinPromptLimits(draft[q.id] ?? '')),
     [questions, draft],
   )
 
-  const limitsLabel = useMemo(() => {
-    const first = questions[0]
-    return promptLimitCopy(first?.min_length, first?.max_length)
-  }, [questions])
+  const limitsLabel = promptLimitCopy()
 
   const handleSubmit = async () => {
     if (!competitionId) return
@@ -229,7 +228,7 @@ export default function ReviewPage() {
               const len = promptCharCount(text)
               const isSubmitted = submissionStatus.currentQuestion === q.title
               const isDone = submissionStatus.submitted > idx
-              const inRange = isWithinPromptLimits(text, q.min_length, q.max_length)
+              const inRange = isWithinPromptLimits(text)
               const brief = briefForQuestion(q.title, q.question_number)
               return (
                 <Card
@@ -249,7 +248,7 @@ export default function ReviewPage() {
                         {isSubmitted ? <Spinner className="h-3.5 w-3.5" /> : null}
                         {isDone ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : null}
                         <span className="text-xs tabular-nums text-muted-foreground">
-                          {len} / {q.max_length}
+                          {len} / {PROMPT_MAX_CHARS}
                         </span>
                       </div>
                     </div>
@@ -263,13 +262,13 @@ export default function ReviewPage() {
                     </p>
                     {!inRange && !isSubmitting ? (
                       <p className="mt-2 text-xs text-destructive">
-                        {len < q.min_length
-                          ? `Below minimum length (${q.min_length} characters). Please edit.`
-                          : `Over the ${q.max_length} character limit. Please edit.`}
+                        {len < PROMPT_MIN_CHARS
+                          ? `Below minimum length (${PROMPT_MIN_CHARS} characters). Please edit.`
+                          : `Over the ${PROMPT_MAX_CHARS} character limit. Please edit.`}
                       </p>
                     ) : (
                       <p className="mt-2 text-xs text-muted-foreground">
-                        {wordCount(text)} words · {promptLimitCopy(q.min_length, q.max_length)}
+                        {wordCount(text)} words · {promptLimitCopy()}
                       </p>
                     )}
                     <div className="mt-3 flex justify-end">

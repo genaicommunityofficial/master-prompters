@@ -1,4 +1,5 @@
 from app.services.auth_service import normalize_qr_message
+from app.services.competition_service import to_public_question
 from app.services.submission_service import _estimate_tokens, _word_count, validate_submission
 
 
@@ -57,3 +58,18 @@ def test_validate_length_bounds():
         assert False, "expected too-short error"
     except Exception as e:
         assert "at least" in str(e)
+
+
+def test_public_question_uses_canonical_prompt_limits():
+    q = to_public_question(
+        {
+            "id": "q1",
+            "question_number": 1,
+            "title": "Meme",
+            "description": None,
+            "max_length": 500,
+            "min_length": 10,
+        }
+    )
+    assert q["min_length"] == 20
+    assert q["max_length"] == 2000

@@ -7,6 +7,7 @@ import type {
   PromptInput,
   SubmissionReceipt,
 } from '@/types'
+import { PROMPT_MAX_CHARS, PROMPT_MIN_CHARS } from '@/lib/promptLimits'
 import { ApiError } from './errors'
 import { supabaseBrowser } from './supabaseClient'
 
@@ -56,8 +57,8 @@ function toQuestion(row: QuestionRow) {
     question_number: number,
     title: row.title || `Question ${number}`,
     description: row.description,
-    max_length: row.max_length ?? 2000,
-    min_length: row.min_length ?? 20,
+    max_length: PROMPT_MAX_CHARS,
+    min_length: PROMPT_MIN_CHARS,
   }
 }
 

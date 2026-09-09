@@ -9,6 +9,39 @@ import { adminNavLinks, participantNavLinks } from '@/lib/nav'
 import { clearSession, getToken, api } from '@/services/api'
 import { cn } from '@/lib/utils'
 
+function SessionActions({
+  signedIn,
+  name,
+  onSignOut,
+}: {
+  signedIn: boolean
+  name?: string
+  onSignOut: () => void
+}) {
+  if (signedIn) {
+    return (
+      <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center md:gap-3">
+        {name ? (
+          <p className="max-w-[14rem] truncate px-1 text-sm text-muted-foreground md:px-0" title={name}>
+            {name}
+          </p>
+        ) : null}
+        <Button type="button" size="sm" onClick={onSignOut}>
+          Sign out
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <Button asChild size="sm">
+      <Link to="/" state={{ loginRequired: true }}>
+        Sign in
+      </Link>
+    </Button>
+  )
+}
+
 function BrandLockup({ to }: { to: string }) {
   return (
     <Link to={to} className="flex min-w-0 items-center gap-2.5">
@@ -110,11 +143,9 @@ export function SiteHeader({ className }: { className?: string }) {
     nav('/')
   }
 
-  const trailing = token ? (
-    <Button variant="ghost" size="sm" onClick={handleLogout}>
-      Sign out {name ? `· ${name}` : ''}
-    </Button>
-  ) : null
+  const trailing = (
+    <SessionActions signedIn={Boolean(token)} name={name} onSignOut={() => void handleLogout()} />
+  )
 
   return (
     <HeaderFrame
@@ -199,7 +230,7 @@ export function AdminHeader({
             <TestModeSwitch testMode={testMode} onChange={onTestModeChange} />
           ) : null}
           {signedIn ? (
-            <Button variant="ghost" size="sm" onClick={onSignOut}>
+            <Button type="button" size="sm" onClick={onSignOut}>
               Sign out
             </Button>
           ) : null}
@@ -252,7 +283,7 @@ export function AdminHeader({
               </Button>
             ))}
             {signedIn ? (
-              <Button variant="ghost" size="sm" onClick={onSignOut}>
+              <Button type="button" size="sm" onClick={onSignOut}>
                 Sign out
               </Button>
             ) : null}

@@ -10,12 +10,20 @@ export function promptCharCount(text: string): number {
   return text.trim().length
 }
 
-export function isWithinPromptLimits(text: string, min: number, max: number): boolean {
+export function isWithinPromptLimits(
+  text: string,
+  min: number = PROMPT_MIN_CHARS,
+  max: number = PROMPT_MAX_CHARS,
+): boolean {
   const n = promptCharCount(text)
   return n >= min && n <= max
 }
 
-export function promptLengthHint(len: number, min: number, max: number): string {
+export function promptLengthHint(
+  len: number,
+  min: number = PROMPT_MIN_CHARS,
+  max: number = PROMPT_MAX_CHARS,
+): string {
   if (len < min) return `Minimum ${min} characters`
   if (len > max) return `Over the ${max} character limit`
   return 'Ready'
