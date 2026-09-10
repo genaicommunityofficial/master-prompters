@@ -277,6 +277,7 @@ class TestLeaderboardBypass:
 
         data = lb_svc.get_leaderboard("c1", ignore_visibility=True)
         assert data["visible"] is True
+        assert data["published"] is False
         assert data["entries"][0]["display_name"] == "Ada"
 
         # Without the bypass the same hidden competition stays hidden.

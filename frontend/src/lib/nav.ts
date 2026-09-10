@@ -13,6 +13,7 @@ export function adminNavLinks(): SiteLink[] {
     { label: 'Dashboard', to: '/admin' },
     { label: 'Participants', to: '/admin/participants' },
     { label: 'Evaluation', to: '/admin/eval' },
+    { label: 'Leaderboard', to: '/admin/leaderboard' },
     { label: 'Criteria', to: '/admin/criteria' },
     { label: 'Export', to: '/admin/export' },
   ]

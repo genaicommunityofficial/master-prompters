@@ -67,6 +67,7 @@ export interface LeaderboardEntry {
 
 export interface LeaderboardResponse {
   visible: boolean
+  published?: boolean
   entries: LeaderboardEntry[]
 }
 

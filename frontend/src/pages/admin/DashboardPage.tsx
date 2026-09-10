@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { Eye, EyeOff, Lock, LockOpen, Pause, Play, RefreshCw, RotateCcw, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -257,6 +257,9 @@ export default function DashboardPage() {
         >
           {leaderboardVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           {leaderboardVisible ? 'Unpublish leaderboard' : 'Publish leaderboard'}
+        </Button>
+        <Button size="sm" variant="outline" asChild>
+          <Link to="/admin/leaderboard">Preview leaderboard</Link>
         </Button>
       </div>
 

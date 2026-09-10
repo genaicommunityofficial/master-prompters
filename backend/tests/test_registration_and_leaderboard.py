@@ -609,6 +609,7 @@ class TestLeaderboardCategories:
 
         data = svc.get_leaderboard("competition_2026")
         assert data["visible"] is True
+        assert data["published"] is True
         entry = data["entries"][0]
         assert entry["category_scores"] == {1: 80.0, 2: 85.0, 3: 90.0, 4: 75.0, 5: 90.0}
         assert entry["average_score"] == 84.0

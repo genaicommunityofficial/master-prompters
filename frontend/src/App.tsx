@@ -10,6 +10,7 @@ import EvalPage from '@/pages/admin/EvalPage'
 import ParticipantsPage from '@/pages/admin/ParticipantsPage'
 import CriteriaPage from '@/pages/admin/CriteriaPage'
 import ExportPage from '@/pages/admin/ExportPage'
+import AdminLeaderboardPage from '@/pages/admin/LeaderboardPage'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="participants" element={<ParticipantsPage />} />
         <Route path="eval" element={<EvalPage />} />
+        <Route path="leaderboard" element={<AdminLeaderboardPage />} />
         <Route path="criteria" element={<CriteriaPage />} />
         <Route path="export" element={<ExportPage />} />
         <Route path="test" element={<Navigate to="/admin" replace />} />

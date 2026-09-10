@@ -36,11 +36,11 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
     )
     comp_rows = comp.data or []
     if not comp_rows:
-        return {"visible": False, "entries": []}
+        return {"visible": False, "published": False, "entries": []}
 
     visible = bool(comp_rows[0].get("leaderboard_visible"))
     if not visible and not ignore_visibility:
-        return {"visible": False, "entries": []}
+        return {"visible": False, "published": False, "entries": []}
 
     # Ranked submissions, joined with participant display names.
     subs = (
@@ -126,7 +126,7 @@ def get_leaderboard(competition_id: str, ignore_visibility: bool = False) -> dic
             }
         )
 
-    return {"visible": True, "entries": entries}
+    return {"visible": True, "published": visible, "entries": entries}
 
 
 def _category_scores_by_submission(subs_data: list[dict]) -> dict[str, dict[int, float]]:
